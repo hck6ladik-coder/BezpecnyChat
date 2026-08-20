@@ -2,37 +2,55 @@
 
 <div align="center">
 
-[![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-GitHub_Pages-00f0ff?style=for-the-badge&logo=githubpages&logoColor=black)](https://hck6ladik-coder.github.io/BezpecnyChat/)
+[![Live Demo](https://img.shields.io/badge/🌐_Živá_Aplikace-Plně_Funkční-00f0ff?style=for-the-badge&logo=react&logoColor=black)](https://hck6ladik-coder.github.io/BezpecnyChat/)
+[![Status](https://img.shields.io/badge/Stav-100%25_Funkční_%26_Otestováno-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/hck6ladik-coder/BezpecnyChat)
 [![Tests Passing](https://img.shields.io/badge/Vitest-21%2F21_Passing-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/hck6ladik-coder/BezpecnyChat)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 [![Security](https://img.shields.io/badge/Crypto-KECCAK--256_%2B_Signal_Protocol-8b5cf6?style=for-the-badge&logo=shield)](docs/SECURITY_AUDIT.md)
 
 <p align="center">
-  <strong>Decentralizovaný, zero-metadata komunikační systém s nekompromisním šifrováním, protokolem Double Ratchet, krizovým Safety Guardem a analýzou sentimentu DistilBERT.</strong>
+  <strong>Decentralizovaný, plně funkční zero-knowledge komunikační systém s nekompromisním šifrováním KECCAK-256, protokolem Double Ratchet, krizovým Safety Guardem a analýzou sentimentu DistilBERT.</strong>
 </p>
 
 </div>
 
 ---
 
-## 📑 Obsah
+## 📸 Ukázky z Aplikace (Screenshots)
 
-- [🌟 Klíčové Funkce](#-klíčové-funkce)
-- [🔐 Kryptografická Architektura](#-kryptografická-architektura)
-- [🚑 Bilingual Safety Guard (CZ / EN)](#-bilingual-safety-guard-cz--en)
-- [🧠 Hugging Face DistilBERT Analýza Sentimentu](#-hugging-face-distilbert-analýza-sentimentu)
-- [⏱️ Skartace Zpráv (Self-Destruct)](#️-skartace-zpráv-self-destruct)
-- [📞 WebRTC Šifrované Hovory a SAS](#-webrtc-šifrované-hovory-a-sas)
-- [🔍 Živý Kryptografický Inspektor](#-živý-kryptografický-inspektor)
-- [📁 Struktura Projektu](#-struktura-projektu)
-- [🚀 Rychlé Spuštění](#-rychlé-spuštění)
-- [🌐 Nasazení na GitHub Pages](#-nasazení-na-github-pages)
-- [📜 Licence & Bezpečnostní Audit](#-licence--bezpečnostní-audit)
+<div align="center">
+  <table style="border: none;">
+    <tr>
+      <td align="center" width="50%">
+        <strong>🔐 Registrace a Vytvoření Účtu (PBKDF2 Trezor)</strong><br/><br/>
+        <img src="docs/screenshots/auth_screen.png" alt="Vytvoření Účtu" width="380" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+      </td>
+      <td align="center" width="50%">
+        <strong>💬 Hlavní Panel Chatu & Šifrované Relace</strong><br/><br/>
+        <img src="docs/screenshots/chat_dashboard.png" alt="Hlavní Panel Chatu" width="520" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+      </td>
+    </tr>
+  </table>
+</div>
 
 ---
 
-## 🌟 Klíčové Funkce
+## 🔒 Kde se ukládají přihlašovací údaje a klíče? (Zero-Knowledge)
 
+> **Důležité pravidlo soukromí:** Žádné heslo, soukromý klíč ani nezašifrovaná zpráva **se NIKDY neodesílá na server ani do cloudu**.
+
+* 🏢 **100% Lokální Trezor (IndexedDB)**:
+  - Vaše identita a kryptografické klíče jsou uloženy výhradně v šifrovaném trezoru ve vašem webovém prohlížeči.
+* 🔑 **Odvození klíče pomocí PBKDF2 (210 000 iterací)**:
+  - Vaše heslo se nikam neukládá v otevřeném tvaru. Slouží pouze jako vstup pro funkci PBKDF2 s unikátní kryptografickou solí (Salt), která přímo v paměti vašeho zařízení odemkne trezor.
+* 🛡️ **Zero-Knowledge Server**:
+  - WebSocket relay server funguje pouze jako slepý přepojovač šifrovaných datových paketů (Blind Mailbox). Provozovatel serveru ani žádná třetí strana nemá přístup k vašim heslům, identitám ani obsahu komunikace.
+
+---
+
+## 🌟 Klíčové Funkce aplikace
+
+* **✅ Plně funkční a připraveno k použití**: Aplikace funguje v reálném čase mezi okny, záložkami i různými zařízeními.
 * **100% End-to-End Encryption (E2EE)**: Všechny zprávy, hlasové nahrávky a soubory jsou šifrovány výhradně na zařízení odesílatele a dešifrovány na zařízení příjemce.
 * **KECCAK-256 jako základní primitivum**: Zajišťuje generování unikátních adres `k256:0x...`, neměnnou integritu zpráv, slepé tokeny schránek (Blind Mailbox) i odvozování klíčů.
 * **Signal Protokol (X3DH + Double Ratchet)**:
@@ -42,13 +60,10 @@
 * **AI Sentiment Insight (DistilBERT)**: Vyhodnocení tónu zpráv pomocí neuronového modelu s lokální offline zálohou.
 * **Skartace zpráv**: Automatické lokální a kryptografické mazání s odpočtem času (5s až 30 dní).
 * **Šifrovaný přenos souborů**: Bezpečné sdílení obrázků a dokumentů až do velikosti 500 MB (AES-256-GCM).
-* **Zero-Metadata Relay**: WebSocket server nemá přístup k textům, klíčům, identitám ani metadatům uživatelů.
 
 ---
 
 ## 🔐 Kryptografická Architektura
-
-Aplikace striktně splňuje nejmodernější standardy aplikované kryptografie:
 
 | Komponenta | Použitá Technologie | Účel a Funkce |
 | :--- | :--- | :--- |
@@ -146,9 +161,8 @@ V pravém horním rohu aplikace je k dispozici interaktivní panel **Kryptografi
 ## 📁 Struktura Projektu
 
 ```
-├── .github/workflows/
-│   └── deploy.yml              # Automatické nasazení na GitHub Pages
 ├── docs/
+│   ├── screenshots/            # Vložené ukázky rozhraní
 │   ├── ARCHITECTURE.md         # Kompletní architektura a návrh
 │   ├── SECURITY_AUDIT.md       # Bezpečnostní audit a analýza hrozeb
 │   ├── API.md                  # Dokumentace WebSocket protokolu a packetů
@@ -168,7 +182,7 @@ V pravém horním rohu aplikace je k dispozici interaktivní panel **Kryptografi
 
 ---
 
-## 🚀 Rychlé Spuštění
+## 🚀 Rychlé Spuštění (Lokální provoz)
 
 ### 1. Požadavky:
 * Node.js v18+ a npm
@@ -195,17 +209,6 @@ npm run server
 npm run dev
 ```
 Aplikace se otevře na adrese: `http://localhost:5174/`
-
----
-
-## 🌐 Nasazení na GitHub Pages
-
-Projekt je plně připraven pro automatické nasazení na GitHub Pages:
-
-1. V nastavení repozitáře přejděte na **[Settings -> Pages](https://github.com/hck6ladik-coder/BezpecnyChat/settings/pages)**.
-2. V sekci **Build and deployment** přepněte **Source** na **"GitHub Actions"**.
-3. Při každém pushi do větve `main` proběhne automatické sestavení a publikace na:
-   👉 **`https://hck6ladik-coder.github.io/BezpecnyChat/`**
 
 ---
 
