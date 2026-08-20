@@ -9,7 +9,14 @@ import { useCrypto } from './CryptoContext';
 import { ratchetEncrypt, ratchetDecrypt } from '../crypto/ratchet';
 import { groupEncrypt, groupDecrypt } from '../crypto/senderKey';
 import { encryptFileBlob, decryptFileBlob } from '../crypto/aes';
-import { computeKeccakTag, deriveKeccakAddress, formatKeccakAddress, getDisplayName, deriveShortChatTag } from '../crypto/keccak';
+import {
+  computeKeccakTag,
+  deriveKeccakAddress,
+  formatKeccakAddress,
+  getDisplayName,
+  deriveShortChatTag,
+  isSamePeer,
+} from '../crypto/keccak';
 import { generateUserPrekeys, createPublicPrekeyBundle, UserPrekeyBundle } from '../crypto/x3dh';
 import { computeSafetyNumber } from '../crypto/safetyNumbers';
 import { analyzeSentimentDistilBert, analyzeLocalSentiment } from '../services/sentimentService';
@@ -193,17 +200,12 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         // Ensure conversation exists or update existing
         setConversations((prev) => {
-          const sClean = data.senderAddress?.replace('k256:0x', '').toLowerCase() || '';
-          const existing = prev.find((c) => {
-            const cClean = c.peerAddress?.replace('k256:0x', '').toLowerCase() || '';
-            return (
-              cClean === sClean ||
-              (cClean.length >= 6 && sClean.startsWith(cClean.slice(0, 6))) ||
-              (sClean.length >= 6 && cClean.startsWith(sClean.slice(0, 6)))
-            );
-          });
+          const existing = prev.find((c) => isSamePeer(c.peerAddress, data.senderAddress));
 
           if (existing) {
+            if (!activeConversationIdRef.current) {
+              setActiveConversationId(existing.id);
+            }
             return prev.map((c) =>
               c.id === existing.id
                 ? {
@@ -217,15 +219,20 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             );
           }
 
+          const newId = `conv_${data.senderAddress}`;
+          if (!activeConversationIdRef.current) {
+            setActiveConversationId(newId);
+          }
+
           const newConv: ChatConversation = {
-            id: `conv_${data.senderAddress}`,
+            id: newId,
             name: getDisplayName(data.senderName, data.senderAddress),
             type: 'direct',
             peerAddress: data.senderAddress,
             peerIdentityKeyHex: data.bundle?.identityKeyHex,
             safetyNumberVerified: false,
             avatar: data.senderAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${data.senderAddress}`,
-            unreadCount: 1,
+            unreadCount: 0,
             selfDestructSetting: data.selfDestructTimer || 'off',
             isOnline: true,
             lastMessage: incomingMsg,
@@ -586,17 +593,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
-  // Filter messages for active chat (match by conversationId OR by peer/sender address)
+  // Filter messages for active chat (match by conversationId OR by peer/sender address using isSamePeer)
   const currentChatMessages = messages.filter((m) => {
-    if (!activeConversationId) return false;
-    if (m.conversationId === activeConversationId) return true;
-    if (activeConversation?.peerAddress) {
-      const pAddr = activeConversation.peerAddress.toLowerCase();
-      const sAddr = m.senderAddress.toLowerCase();
-      const rAddr = m.recipientAddress?.toLowerCase();
-      if ((sAddr === pAddr && rAddr === profile?.address.toLowerCase()) || (sAddr === profile?.address.toLowerCase() && rAddr === pAddr)) {
+    if (!activeConversation) return false;
+    if (m.conversationId === activeConversation.id) return true;
+    if (activeConversation.peerAddress) {
+      const isFromPeer = isSamePeer(m.senderAddress, activeConversation.peerAddress);
+      const isToPeer = isSamePeer(m.recipientAddress, activeConversation.peerAddress);
+      const isFromMe = isSamePeer(m.senderAddress, profile?.address);
+      const isToMe = isSamePeer(m.recipientAddress, profile?.address);
+      if ((isFromPeer && isToMe) || (isFromMe && isToPeer)) {
         return true;
       }
+    }
+    if (activeConversation.type === 'group' && m.groupId === activeConversation.id) {
+      return true;
     }
     return false;
   });

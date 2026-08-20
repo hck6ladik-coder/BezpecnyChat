@@ -69,6 +69,20 @@ export function formatKeccakAddress(address?: string): string {
 }
 
 /**
+ * Checks if two peer addresses or short tags represent the exact same entity
+ */
+export function isSamePeer(addr1?: string, addr2?: string): boolean {
+  if (!addr1 || !addr2) return false;
+  const c1 = addr1.replace('k256:0x', '').replace('#', '').replace('-', '').trim().toLowerCase();
+  const c2 = addr2.replace('k256:0x', '').replace('#', '').replace('-', '').trim().toLowerCase();
+  if (c1 === c2) return true;
+  if (c1.length >= 6 && c2.length >= 6) {
+    return c1.slice(0, 6) === c2.slice(0, 6);
+  }
+  return false;
+}
+
+/**
  * Format friendly display name for any contact (e.g. "Honza #8D7-2AB" or "Uživatel #8D7-2AB")
  */
 export function getDisplayName(name?: string, address?: string): string {
