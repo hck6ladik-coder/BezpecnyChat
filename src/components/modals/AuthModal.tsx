@@ -16,6 +16,10 @@ import {
   MessageSquare,
   KeyRound,
   Check,
+  Flame,
+  Settings,
+  Shield,
+  Radio,
 } from 'lucide-react';
 import { useCrypto } from '../../context/CryptoContext';
 import { formatSiweMessage, signSiweMessage } from '../../crypto/auth';
@@ -27,6 +31,16 @@ import {
   isPhoneNumber,
   generateSmsCode,
 } from '../../crypto/phone';
+import {
+  getFirebaseConfig,
+  saveFirebaseConfig,
+  clearFirebaseConfig,
+  isFirebaseConfigured,
+  createRecaptchaVerifier,
+  sendFirebasePhoneOtp,
+  verifyFirebasePhoneOtp,
+} from '../../services/firebase';
+import type { ConfirmationResult } from 'firebase/auth';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -71,6 +85,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [isSmsMode, setIsSmsMode] = useState(false);
   const [isSmsSending, setIsSmsSending] = useState(false);
   const [smsSuccessMsg, setSmsSuccessMsg] = useState<string | null>(null);
+
+  // Firebase Auth State
+  const [firebaseConfirmation, setFirebaseConfirmation] = useState<ConfirmationResult | null>(null);
+  const [isFirebaseSending, setIsFirebaseSending] = useState(false);
+  const [firebaseCountdown, setFirebaseCountdown] = useState(0);
+  const [isFirebaseSettingsOpen, setIsFirebaseSettingsOpen] = useState(false);
+  const [fbApiKey, setFbApiKey] = useState(() => getFirebaseConfig()?.apiKey || '');
+  const [fbProjectId, setFbProjectId] = useState(() => getFirebaseConfig()?.projectId || '');
+  const [fbAppId, setFbAppId] = useState(() => getFirebaseConfig()?.appId || '');
+  const [fbAuthDomain, setFbAuthDomain] = useState(() => getFirebaseConfig()?.authDomain || '');
+  const [fbConfigSavedMsg, setFbConfigSavedMsg] = useState<string | null>(null);
+
+  // Cooldown countdown timer
+  useEffect(() => {
+    let timer: any;
+    if (firebaseCountdown > 0) {
+      timer = setTimeout(() => setFirebaseCountdown((c) => c - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [firebaseCountdown]);
 
   // Change password modal state
   const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
@@ -232,9 +266,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Trigger SMS Quick Login
+  // Handle Trigger Real Firebase SMS OTP Login
+  const handleSendFirebaseSms = async () => {
+    setLoginError(null);
+    setSmsSuccessMsg(null);
+    const fullIdentifier = getFullLoginPhone();
+    if (!fullIdentifier) {
+      setLoginError('Zadejte prosím vaše telefonní číslo (např. 777 123 456) pro odeslání SMS kódu.');
+      return;
+    }
+
+    if (!isFirebaseConfigured()) {
+      setIsFirebaseSettingsOpen(true);
+      setLoginError('Pro odeslání reálné SMS zadejte API klíč a Project ID z Firebase konzole.');
+      return;
+    }
+
+    setIsFirebaseSending(true);
+    try {
+      const verifier = createRecaptchaVerifier('firebase-recaptcha-container');
+      const confirmation = await sendFirebasePhoneOtp(fullIdentifier, verifier);
+      setFirebaseConfirmation(confirmation);
+      setIsSmsMode(true);
+      setEnteredSmsCode('');
+      setFirebaseCountdown(60);
+      setSmsSuccessMsg(`🔥 Reálná SMS s kódem byla odeslána na ${formatPhoneDisplay(fullIdentifier)} přes Firebase!`);
+    } catch (err: any) {
+      console.error('Firebase SMS error:', err);
+      setLoginError(err.message || 'Nepodařilo se odeslat SMS přes Firebase. Zkontrolujte konfiguraci.');
+    } finally {
+      setIsFirebaseSending(false);
+    }
+  };
+
+  // Handle Trigger Simulated SMS Quick Login (Zero cost, instant)
   const handleRequestSmsLogin = async () => {
     setLoginError(null);
+    setFirebaseConfirmation(null);
     const fullIdentifier = getFullLoginPhone();
     if (!fullIdentifier) {
       setLoginError('Zadejte prosím vaše telefonní číslo (např. 777 123 456) pro odeslání SMS kódu.');
@@ -246,16 +314,62 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setSimulatedSmsCode(code);
     setIsSmsMode(true);
     setEnteredSmsCode(code); // Pre-fill for instantaneous convenience
-    setSmsSuccessMsg(`Ověřovací SMS kód byla odeslána na ${formatPhoneDisplay(fullIdentifier)}`);
+    setSmsSuccessMsg(`⚡ Bleskový testovací kód pro ${formatPhoneDisplay(fullIdentifier)} byl vygenerován.`);
     setIsSmsSending(false);
   };
 
-  // Handle Confirm SMS OTP Login
+  // Handle Confirm SMS OTP Login (Handles both Firebase & Simulated)
   const handleConfirmSmsLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setLoginError(null);
 
     const fullIdentifier = getFullLoginPhone();
+    if (!fullIdentifier) {
+      setLoginError('Zadejte prosím telefonní číslo.');
+      return;
+    }
+
+    // 1. If Firebase Confirmation is active
+    if (firebaseConfirmation) {
+      if (!enteredSmsCode || enteredSmsCode.trim().length !== 6) {
+        setLoginError('Zadejte 6místný kód z SMS zprávy.');
+        return;
+      }
+
+      setIsLoggingIn(true);
+      try {
+        // Ověření kódu ve Firebase
+        const { idToken } = await verifyFirebasePhoneOtp(firebaseConfirmation, enteredSmsCode.trim());
+        
+        // Synchronizace a audit s backendem
+        try {
+          await fetch('/api/auth/verify-token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idToken }),
+          });
+        } catch (beErr) {
+          console.warn('Backend audit note:', beErr);
+        }
+
+        // Odemčení KECCAK E2EE trezoru pro toto číslo
+        const success = await unlockWithSmsOtp(fullIdentifier, rememberLogin);
+        if (success) {
+          setFirebaseConfirmation(null);
+          setIsSmsMode(false);
+          onClose();
+        } else {
+          setLoginError('Chyba při odemykání šifrovacího profilu.');
+        }
+      } catch (err: any) {
+        setLoginError(err.message || 'Neplatný nebo vypršený SMS kód z Firebase.');
+      } finally {
+        setIsLoggingIn(false);
+      }
+      return;
+    }
+
+    // 2. Simulated OTP verification
     if (!enteredSmsCode || enteredSmsCode.trim() !== simulatedSmsCode) {
       setLoginError('Zadaný SMS kód není správný. Zkontrolujte prosím kód.');
       return;
@@ -421,6 +535,134 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             <span>Registrace nového čísla</span>
           </button>
         </div>
+
+        {/* Firebase Status & Configuration Bar */}
+        <div className="flex items-center justify-between text-xs px-1 py-0.5">
+          <div className="flex items-center space-x-1.5 text-slate-400">
+            <Flame className="w-3.5 h-3.5 text-amber-500" />
+            <span className="text-[11px]">Firebase Phone Auth:</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${isFirebaseConfigured() ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'}`}>
+              {isFirebaseConfigured() ? 'Nakonfigurováno' : 'Výchozí režim'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setIsFirebaseSettingsOpen(!isFirebaseSettingsOpen);
+              setFbConfigSavedMsg(null);
+            }}
+            className="text-[11px] text-cyber-400 hover:text-cyber-300 flex items-center space-x-1 underline transition-colors"
+          >
+            <Settings className="w-3 h-3" />
+            <span>{isFirebaseSettingsOpen ? 'Zavřít nastavení' : '⚙️ Nastavení Firebase'}</span>
+          </button>
+        </div>
+
+        {/* Firebase Config Drawer */}
+        {isFirebaseSettingsOpen && (
+          <div className="p-4 bg-slate-950/95 border border-amber-500/40 rounded-2xl space-y-3 animate-in slide-in-from-top-2 duration-150 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-amber-400">
+                <Flame className="w-4 h-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  Konfigurace Firebase Projektu
+                </span>
+              </div>
+              <a
+                href="https://console.firebase.google.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-cyber-400 hover:text-cyber-300 underline"
+              >
+                Konzole Firebase ↗
+              </a>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Pro odesílání reálných SMS zpráv zadejte údaje z nastavení vašeho Firebase projektu:
+            </p>
+
+            <div className="space-y-2">
+              <div>
+                <label className="block text-[10px] text-slate-400 mb-0.5">
+                  Web API Key (VITE_FIREBASE_API_KEY)
+                </label>
+                <input
+                  type="text"
+                  placeholder="AIzaSy..."
+                  value={fbApiKey}
+                  onChange={(e) => setFbApiKey(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">Project ID</label>
+                  <input
+                    type="text"
+                    placeholder="muj-projekt-123"
+                    value={fbProjectId}
+                    onChange={(e) => setFbProjectId(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-slate-400 mb-0.5">App ID</label>
+                  <input
+                    type="text"
+                    placeholder="1:12345:web:abc"
+                    value={fbAppId}
+                    onChange={(e) => setFbAppId(e.target.value)}
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {fbConfigSavedMsg && (
+              <div className="text-[11px] text-emerald-400 flex items-center space-x-1.5 p-1.5 bg-emerald-950/40 rounded-lg">
+                <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>{fbConfigSavedMsg}</span>
+              </div>
+            )}
+
+            <div className="flex items-center space-x-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!fbApiKey || !fbProjectId) {
+                    setLoginError('Zadejte prosím alespoň API Key a Project ID.');
+                    return;
+                  }
+                  saveFirebaseConfig({
+                    apiKey: fbApiKey.trim(),
+                    projectId: fbProjectId.trim(),
+                    appId: fbAppId.trim() || '1:1234567890:web:abcdef',
+                    authDomain: fbAuthDomain.trim() || `${fbProjectId.trim()}.firebaseapp.com`,
+                  });
+                  setFbConfigSavedMsg('Firebase konfigurace byla úspěšně uložena!');
+                }}
+                className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-500/20"
+              >
+                Uložit nastavení Firebase
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearFirebaseConfig();
+                  setFbApiKey('');
+                  setFbProjectId('');
+                  setFbAppId('');
+                  setFbConfigSavedMsg('Konfigurace vymazána.');
+                }}
+                className="py-1.5 px-3 bg-slate-850 hover:bg-slate-800 text-slate-300 text-xs rounded-xl transition-all border border-slate-700"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Simulated Incoming SMS Banner */}
         {simulatedSmsCode && (
@@ -748,36 +990,144 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   </button>
                 </div>
 
-                {/* Action Buttons: Password Login + SMS Fast Login */}
-                <div className="space-y-2 pt-1">
-                  <button
-                    type="submit"
-                    disabled={isLoggingIn}
-                    className="w-full py-2.5 px-4 rounded-xl bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-md shadow-cyber-500/20 disabled:opacity-50"
-                  >
-                    {isLoggingIn ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Ověřování a odemykání...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Unlock className="w-3.5 h-3.5" />
-                        <span>Přihlásit se heslem</span>
-                      </>
-                    )}
-                  </button>
+                {/* Invisible reCAPTCHA container for Firebase */}
+                <div id="firebase-recaptcha-container"></div>
 
-                  <button
-                    type="button"
-                    onClick={handleRequestSmsLogin}
-                    disabled={isSmsSending || isLoggingIn}
-                    className="w-full py-2 px-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-cyber-500/30 hover:border-cyber-500/60 text-xs text-cyber-300 hover:text-cyber-200 font-semibold flex items-center justify-center space-x-2 transition-all"
-                  >
-                    <Smartphone className="w-3.5 h-3.5 text-cyber-400" />
-                    <span>📱 Přihlásit se pomocí SMS kódu (Bez hesla)</span>
-                  </button>
-                </div>
+                {/* SMS OTP verification mode or standard action buttons */}
+                {isSmsMode ? (
+                  <div className="p-3.5 bg-slate-900 border border-cyber-500/50 rounded-2xl space-y-3 shadow-lg animate-in zoom-in-95">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2 text-cyber-400">
+                        <Smartphone className="w-4 h-4" />
+                        <span className="text-xs font-bold">Ověření SMS kódu</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {formatPhoneDisplay(getFullLoginPhone())}
+                      </span>
+                    </div>
+
+                    {smsSuccessMsg && (
+                      <div className="p-2 bg-cyber-950/70 border border-cyber-700/60 rounded-xl text-[11px] text-cyber-300 flex items-center space-x-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 text-cyber-400" />
+                        <span>{smsSuccessMsg}</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">
+                        Zadejte 6místný kód z SMS zprávy:
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={6}
+                        autoFocus
+                        placeholder="123456"
+                        value={enteredSmsCode}
+                        onChange={(e) => setEnteredSmsCode(e.target.value.replace(/\D/g, ''))}
+                        className="w-full px-3 py-2 bg-slate-950 border border-cyber-500/60 rounded-xl text-center text-lg font-mono tracking-widest text-cyber-300 focus:outline-none focus:border-cyber-400 focus:ring-1 focus:ring-cyber-500/30"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={handleConfirmSmsLogin}
+                        disabled={isLoggingIn || enteredSmsCode.length < 6}
+                        className="w-full py-2.5 px-4 bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-bold text-xs rounded-xl transition-all shadow-md shadow-cyber-500/20 disabled:opacity-50 flex items-center justify-center space-x-2"
+                      >
+                        {isLoggingIn ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Ověřování a odemykání...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Ověřit SMS kód a vstoupit</span>
+                          </>
+                        )}
+                      </button>
+
+                      <div className="flex items-center justify-between text-[11px] pt-0.5">
+                        <button
+                          type="button"
+                          disabled={firebaseCountdown > 0 || isFirebaseSending}
+                          onClick={handleSendFirebaseSms}
+                          className="text-amber-400 hover:text-amber-300 disabled:text-slate-600 underline transition-colors flex items-center space-x-1"
+                        >
+                          <Flame className="w-3 h-3" />
+                          <span>
+                            {firebaseCountdown > 0
+                              ? `Znovu za ${firebaseCountdown}s`
+                              : 'Znovu odeslat reálnou SMS'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsSmsMode(false);
+                            setFirebaseConfirmation(null);
+                          }}
+                          className="text-slate-400 hover:text-slate-200"
+                        >
+                          Zpět na heslo
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2 pt-1">
+                    {/* 1. Password login */}
+                    <button
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className="w-full py-2.5 px-4 rounded-xl bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-md shadow-cyber-500/20 disabled:opacity-50"
+                    >
+                      {isLoggingIn ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Ověřování a odemykání...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="w-3.5 h-3.5" />
+                          <span>Přihlásit se heslem</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* 2. Real Firebase SMS OTP */}
+                    <button
+                      type="button"
+                      onClick={handleSendFirebaseSms}
+                      disabled={isFirebaseSending || isLoggingIn}
+                      className="w-full py-2 px-3 rounded-xl bg-amber-950/40 hover:bg-amber-950/70 border border-amber-500/40 hover:border-amber-500/70 text-xs text-amber-300 hover:text-amber-200 font-semibold flex items-center justify-center space-x-2 transition-all shadow-sm"
+                    >
+                      {isFirebaseSending ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Odesílám Firebase SMS...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Flame className="w-3.5 h-3.5 text-amber-400" />
+                          <span>🔥 Odeslat SMS kód přes Firebase Auth</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* 3. Fast Simulated SMS Code */}
+                    <button
+                      type="button"
+                      onClick={handleRequestSmsLogin}
+                      disabled={isSmsSending || isLoggingIn}
+                      className="w-full py-2 px-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/80 hover:border-cyber-500/40 text-xs text-slate-300 hover:text-cyber-300 font-medium flex items-center justify-center space-x-2 transition-all"
+                    >
+                      <Smartphone className="w-3.5 h-3.5 text-cyber-400" />
+                      <span>⚡ Bleskový testovací kód (Simulace bez kreditu)</span>
+                    </button>
+                  </div>
+                )}
               </form>
             </div>
           </div>
