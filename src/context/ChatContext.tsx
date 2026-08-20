@@ -4,6 +4,7 @@ import {
   ChatConversation,
   SelfDestructDuration,
   UserProfile,
+  FriendContact,
 } from '../types/chat';
 import { useCrypto } from './CryptoContext';
 import { ratchetEncrypt, ratchetDecrypt } from '../crypto/ratchet';
@@ -40,6 +41,7 @@ interface ChatContextType {
   isOnline: boolean;
   offlineQueueCount: number;
   discoveredPeers: DiscoveredPeer[];
+  friends: FriendContact[];
 
   setActiveConversationId: (id: string | null) => void;
   setSearchQuery: (query: string) => void;
@@ -55,6 +57,9 @@ interface ChatContextType {
   blockContact: (address: string) => void;
   unblockContact: (address: string) => void;
   verifyContactSafetyNumber: (conversationId: string) => void;
+  addFriend: (contact: { address: string; username?: string; notes?: string }) => void;
+  removeFriend: (address: string) => void;
+  isFriend: (address: string) => boolean;
 }
 
 const ChatContext = createContext<ChatContextType | null>(null);
@@ -88,6 +93,55 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineQueue, setOfflineQueue] = useState<ChatMessage[]>([]);
   const [discoveredPeers, setDiscoveredPeers] = useState<DiscoveredPeer[]>([]);
+  const [friends, setFriends] = useState<FriendContact[]>(() => {
+    try {
+      const stored = localStorage.getItem('keccak_friends_list');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const saveFriends = (newList: FriendContact[]) => {
+    setFriends(newList);
+    try {
+      localStorage.setItem('keccak_friends_list', JSON.stringify(newList));
+    } catch {}
+  };
+
+  const addFriend = (contact: { address: string; username?: string; notes?: string }) => {
+    const shortTag = formatKeccakAddress(contact.address);
+    const newFriend: FriendContact = {
+      address: contact.address,
+      username: contact.username || `Uživatel ${shortTag}`,
+      shortTag,
+      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${contact.address}`,
+      addedAt: Date.now(),
+      isOnline: true,
+      notes: contact.notes,
+    };
+
+    saveFriends([
+      newFriend,
+      ...friends.filter((f) => !isSamePeer(f.address, contact.address)),
+    ]);
+
+    addAuditLog({
+      type: 'handshake',
+      title: 'Přidán nový přítel',
+      description: `Uživatel ${newFriend.username} (${shortTag}) byl přidán do vašeho seznamu přátel.`,
+      details: { address: contact.address },
+      severity: 'info',
+    });
+  };
+
+  const removeFriend = (address: string) => {
+    saveFriends(friends.filter((f) => !isSamePeer(f.address, address)));
+  };
+
+  const isFriend = (address: string): boolean => {
+    return friends.some((f) => isSamePeer(f.address, address));
+  };
 
   const p2pMeshRef = useRef<P2PMeshNetwork | null>(null);
   const profileRef = useRef(profile);
@@ -136,6 +190,19 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             },
           ];
         });
+
+        // Sync friend online state
+        setFriends((prev) =>
+          prev.map((f) =>
+            isSamePeer(f.address, data.address)
+              ? {
+                  ...f,
+                  username: data.username || f.username,
+                  isOnline: true,
+                }
+              : f
+          )
+        );
       }
     }
 
@@ -623,6 +690,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isOnline,
         offlineQueueCount: offlineQueue.length,
         discoveredPeers,
+        friends,
         setActiveConversationId,
         setSearchQuery,
         sendMessage,
@@ -633,6 +701,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         blockContact,
         unblockContact,
         verifyContactSafetyNumber,
+        addFriend,
+        removeFriend,
+        isFriend,
       }}
     >
       {children}

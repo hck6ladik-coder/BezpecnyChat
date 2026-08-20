@@ -29,7 +29,7 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
   onClose,
 }) => {
   const { profile } = useCrypto();
-  const { createDirectChat, discoveredPeers } = useChat();
+  const { createDirectChat, discoveredPeers, addFriend } = useChat();
 
   const [inputQuery, setInputQuery] = useState('');
   const [nicknameInput, setNicknameInput] = useState('');
@@ -119,6 +119,10 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
 
     try {
       await createDirectChat(targetAddress, targetName);
+      addFriend({
+        address: targetAddress,
+        username: targetName,
+      });
       setInputQuery('');
       setNicknameInput('');
       setError(null);

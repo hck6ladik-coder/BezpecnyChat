@@ -31,7 +31,9 @@ interface CryptoContextType {
   prekeys: StoredPrekeys | null;
   publicBundle: UserPrekeyBundle | null;
   auditLogs: SecurityAuditEntry[];
+  savedUsername: string;
   
+  checkNicknameAvailable: (username: string) => Promise<{ available: boolean; reason?: string }>;
   createIdentity: (password: string, username: string) => Promise<UserProfile>;
   unlockVault: (password: string) => Promise<boolean>;
   lockVault: () => void;
@@ -57,6 +59,8 @@ const STORAGE_KEY_PROFILE = 'user_profile';
 const STORAGE_KEY_PREKEYS = 'user_prekeys';
 const STORAGE_KEY_SALT = 'keccak_auth_salt';
 const STORAGE_KEY_AUDIT = 'keccak_audit_logs';
+const STORAGE_KEY_USERNAMES = 'keccak_registered_usernames';
+const STORAGE_KEY_LAST_USER = 'keccak_last_username';
 
 export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
@@ -65,6 +69,9 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [prekeys, setPrekeys] = useState<StoredPrekeys | null>(null);
   const [publicBundle, setPublicBundle] = useState<UserPrekeyBundle | null>(null);
   const [auditLogs, setAuditLogs] = useState<SecurityAuditEntry[]>([]);
+  const [savedUsername, setSavedUsername] = useState<string>(
+    () => localStorage.getItem(STORAGE_KEY_LAST_USER) || ''
+  );
   
   // In-memory active ratchets and group keys
   const [ratchetSessions, setRatchetSessions] = useState<Map<string, RatchetState>>(new Map());
@@ -85,9 +92,50 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (savedSalt) {
       setIsInitialized(true);
     }
+    const lastUser = localStorage.getItem(STORAGE_KEY_LAST_USER);
+    if (lastUser) {
+      setSavedUsername(lastUser);
+    }
   }, []);
 
+  const checkNicknameAvailable = async (
+    rawUsername: string
+  ): Promise<{ available: boolean; reason?: string }> => {
+    const clean = rawUsername.trim();
+    if (!clean) {
+      return { available: false, reason: 'Zadejte prosím přezdívku.' };
+    }
+    if (clean.length < 2) {
+      return { available: false, reason: 'Přezdívka musí mít alespoň 2 znaky.' };
+    }
+    if (clean.length > 24) {
+      return { available: false, reason: 'Přezdívka může mít maximálně 24 znaků.' };
+    }
+
+    try {
+      const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
+      const registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
+      const isTaken = registeredList.some(
+        (name) => name.toLowerCase() === clean.toLowerCase()
+      );
+      if (isTaken) {
+        return {
+          available: false,
+          reason: `Přezdívka "${clean}" je již obsazená. Zvolte prosím jinou.`,
+        };
+      }
+    } catch {}
+
+    return { available: true };
+  };
+
   const createIdentity = async (password: string, username: string): Promise<UserProfile> => {
+    const trimmedNick = username.trim() || 'Anonymní Uživatel';
+    const check = await checkNicknameAvailable(trimmedNick);
+    if (!check.available) {
+      throw new Error(check.reason || 'Tato přezdívka je již obsazená.');
+    }
+
     const { masterKey, saltHex } = await deriveMasterKey(password);
     localStorage.setItem(STORAGE_KEY_SALT, saltHex);
 
@@ -99,7 +147,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const newProfile: UserProfile = {
       address,
-      username: username.trim() || 'Anonymní Uživatel',
+      username: trimmedNick,
       bio: 'Používám šifrovanou komunikaci s KECCAK256 protokolem.',
       avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${address}`,
       identityKeyHex: generatedPrekeys.identityKeyPair.publicKeyHex,
@@ -120,6 +168,18 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, newProfile);
     await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, serializedPrekeys);
+
+    // Save to registered usernames list
+    try {
+      const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
+      const registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
+      if (!registeredList.some((n) => n.toLowerCase() === trimmedNick.toLowerCase())) {
+        registeredList.push(trimmedNick);
+        localStorage.setItem(STORAGE_KEY_USERNAMES, JSON.stringify(registeredList));
+      }
+    } catch {}
+    localStorage.setItem(STORAGE_KEY_LAST_USER, trimmedNick);
+    setSavedUsername(trimmedNick);
 
     setProfile(newProfile);
     setPrekeys(generatedPrekeys);
@@ -167,6 +227,11 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       };
 
       const bundle = createPublicPrekeyBundle(reconstructedPrekeys);
+
+      if (loadedProfile.username) {
+        setSavedUsername(loadedProfile.username);
+        localStorage.setItem(STORAGE_KEY_LAST_USER, loadedProfile.username);
+      }
 
       setProfile(loadedProfile);
       setPrekeys(reconstructedPrekeys);
@@ -375,6 +440,8 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         createMyGroupSenderKey,
         addAuditLog,
         toggleTorRouting,
+        savedUsername,
+        checkNicknameAvailable,
       }}
     >
       {children}

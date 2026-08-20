@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Search,
   UserPlus,
@@ -9,10 +9,13 @@ import {
   Clock,
   Lock,
   Plus,
+  MessageSquare,
+  UserCheck,
 } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { formatKeccakAddress } from '../../crypto/keccak';
 import { ChatConversation } from '../../types/chat';
+import { FriendsList } from './FriendsList';
 
 interface ChatListProps {
   onNewChat: () => void;
@@ -26,7 +29,13 @@ export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => 
     setActiveConversationId,
     searchQuery,
     setSearchQuery,
+    friends,
+    createDirectChat,
   } = useChat();
+
+  const [activeTab, setActiveTab] = useState<'chats' | 'friends'>('chats');
+
+  const onlineFriendsCount = friends.filter((f) => f.isOnline).length;
 
   const filteredConversations = conversations.filter((c) => {
     const rawQ = searchQuery.toLowerCase().trim();
@@ -45,45 +54,93 @@ export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => 
     return date.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleOpenChatFromFriends = async (address: string, name?: string) => {
+    await createDirectChat(address, name);
+    setActiveTab('chats');
+  };
+
   return (
     <aside className="w-full md:w-80 lg:w-96 h-full bg-slate-900/90 border-r border-slate-800 flex flex-col select-none">
-      {/* Top Header & Actions */}
-      <div className="p-3 border-b border-slate-800 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-200 tracking-wide uppercase flex items-center space-x-1.5">
-            <Lock className="w-4 h-4 text-cyber-400" />
-            <span>Šifrované Chaty</span>
-          </h2>
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={onNewChat}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-cyber-500/20 text-slate-300 hover:text-cyber-300 border border-slate-700 transition-colors"
-              title="Zahájit přímý E2EE chat"
-            >
-              <UserPlus className="w-4 h-4" />
-            </button>
-            <button
-              onClick={onNewGroup}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-cyber-500/20 text-slate-300 hover:text-cyber-300 border border-slate-700 transition-colors"
-              title="Vytvořit E2EE skupinu (Sender Key)"
-            >
-              <Users className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Search input */}
-        <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Hledat kontakt nebo k256:0x adresu..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-950/70 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyber-500/50 focus:ring-1 focus:ring-cyber-500/30 transition-all font-mono"
-          />
+      {/* Tab Switcher Header */}
+      <div className="p-2.5 border-b border-slate-800 bg-slate-950/40">
+        <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl">
+          <button
+            onClick={() => setActiveTab('chats')}
+            className={`py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition-all ${
+              activeTab === 'chats'
+                ? 'bg-cyber-500/20 text-cyber-300 border border-cyber-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Zprávy ({conversations.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('friends')}
+            className={`py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center space-x-2 transition-all ${
+              activeTab === 'friends'
+                ? 'bg-cyber-500/20 text-cyber-300 border border-cyber-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Přátelé</span>
+            {friends.length > 0 && (
+              <span className="text-[10px] bg-slate-800 px-1.5 py-0.2 rounded-full text-slate-300 border border-slate-700">
+                {friends.length}
+              </span>
+            )}
+            {onlineFriendsCount > 0 && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50" />
+            )}
+          </button>
         </div>
       </div>
+
+      {activeTab === 'friends' ? (
+        <FriendsList
+          onAddFriend={onNewChat}
+          onOpenChat={handleOpenChatFromFriends}
+        />
+      ) : (
+        <>
+          {/* Top Header & Actions */}
+          <div className="p-3 border-b border-slate-800 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold text-slate-300 tracking-wider uppercase flex items-center space-x-1.5">
+                <Lock className="w-3.5 h-3.5 text-cyber-400" />
+                <span>Šifrované Chaty</span>
+              </h2>
+              <div className="flex items-center space-x-1">
+                <button
+                  onClick={onNewChat}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-cyber-500/20 text-slate-300 hover:text-cyber-300 border border-slate-700 transition-colors"
+                  title="Zahájit přímý E2EE chat"
+                >
+                  <UserPlus className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={onNewGroup}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-cyber-500/20 text-slate-300 hover:text-cyber-300 border border-slate-700 transition-colors"
+                  title="Vytvořit E2EE skupinu (Sender Key)"
+                >
+                  <Users className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Search input */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Hledat kontakt nebo k256:0x adresu..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-slate-950/70 border border-slate-800 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyber-500/50 focus:ring-1 focus:ring-cyber-500/30 transition-all font-mono"
+              />
+            </div>
+          </div>
 
       {/* Conversations List */}
       <div className="flex-1 overflow-y-auto divide-y divide-slate-800/40">
@@ -188,6 +245,8 @@ export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => 
           })
         )}
       </div>
+        </>
+      )}
     </aside>
   );
 };

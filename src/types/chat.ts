@@ -83,6 +83,16 @@ export interface WebRTCCallSession {
   durationSec: number;
 }
 
+export interface FriendContact {
+  address: string;
+  username: string;
+  shortTag: string;
+  avatar: string;
+  addedAt: number;
+  isOnline?: boolean;
+  notes?: string;
+}
+
 export interface SecurityAuditEntry {
   id: string;
   timestamp: number;
