@@ -24,9 +24,12 @@ import {
 } from '../crypto/senderKey';
 import { secureStorage } from '../crypto/storage';
 import { verifyTotpCode, verifyBackupCode } from '../crypto/auth';
+import { normalizePhoneNumber, formatPhoneDisplay, isPhoneNumber } from '../crypto/phone';
 
 export interface UserAccountRecord {
   username: string;
+  phoneNumber?: string;
+  displayPhone?: string;
   saltHex: string;
   address: string;
   avatar: string;
@@ -45,14 +48,26 @@ interface CryptoContextType {
   publicBundle: UserPrekeyBundle | null;
   auditLogs: SecurityAuditEntry[];
   savedUsername: string;
-  savedAccounts: Array<{ username: string; address: string; avatar: string }>;
+  savedAccounts: Array<{
+    username: string;
+    phoneNumber?: string;
+    displayPhone?: string;
+    address: string;
+    avatar: string;
+  }>;
   
-  checkNicknameAvailable: (username: string) => Promise<{ available: boolean; reason?: string }>;
-  createIdentity: (password: string, username: string, rememberLogin?: boolean) => Promise<UserProfile>;
-  unlockVault: (password: string, username?: string, rememberLogin?: boolean) => Promise<boolean>;
-  changePassword: (username: string, newPassword: string) => Promise<boolean>;
+  checkNicknameAvailable: (identifier: string) => Promise<{ available: boolean; reason?: string }>;
+  createIdentity: (
+    password: string,
+    identifier: string,
+    rememberLogin?: boolean,
+    phoneNumber?: string
+  ) => Promise<UserProfile>;
+  unlockVault: (password: string, identifier?: string, rememberLogin?: boolean) => Promise<boolean>;
+  unlockWithSmsOtp: (identifier: string, rememberLogin?: boolean) => Promise<boolean>;
+  changePassword: (identifier: string, newPassword: string) => Promise<boolean>;
   lockVault: () => void;
-  resetAccount: (username: string) => Promise<void>;
+  resetAccount: (identifier: string) => Promise<void>;
   resetAllLocalData: () => Promise<void>;
   rotateKeys: () => Promise<void>;
   enable2FA: (secretHex: string, backupHashes: string[]) => Promise<void>;
@@ -221,41 +236,53 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const savedAccounts = Object.values(getStoredAccounts()).map((a) => ({
     username: a.username,
+    phoneNumber: a.phoneNumber,
+    displayPhone: a.displayPhone || (a.phoneNumber ? formatPhoneDisplay(a.phoneNumber) : undefined),
     address: a.address,
     avatar: a.avatar,
   }));
 
   const checkNicknameAvailable = async (
-    rawUsername: string
+    rawIdentifier: string
   ): Promise<{ available: boolean; reason?: string }> => {
-    const clean = rawUsername.replace(/^@/, '').trim();
+    const clean = rawIdentifier.replace(/^@/, '').trim();
     if (!clean) {
-      return { available: false, reason: 'Zadejte prosím přezdívku.' };
+      return { available: false, reason: 'Zadejte prosím telefonní číslo nebo přezdívku.' };
     }
     if (clean.length < 2) {
-      return { available: false, reason: 'Přezdívka musí mít alespoň 2 znaky.' };
+      return { available: false, reason: 'Přezdívka / číslo musí mít alespoň 2 znaky.' };
     }
-    if (clean.length > 24) {
-      return { available: false, reason: 'Přezdívka může mít maximálně 24 znaků.' };
+
+    const normPhone = normalizePhoneNumber(clean);
+    const isPhone = isPhoneNumber(clean);
+    const accounts = getStoredAccounts();
+
+    // Check against accounts
+    for (const acc of Object.values(accounts)) {
+      if (acc.username.toLowerCase() === clean.toLowerCase()) {
+        return {
+          available: false,
+          reason: `Jméno "${clean}" je již na tomto zařízení obsazené. Můžete se přímo přihlásit nebo nastavit nové heslo.`,
+        };
+      }
+      if (isPhone && acc.phoneNumber && normalizePhoneNumber(acc.phoneNumber) === normPhone) {
+        return {
+          available: false,
+          reason: `Telefonní číslo "${formatPhoneDisplay(normPhone)}" je již zaregistrované. Můžete se přímo přihlásit.`,
+        };
+      }
     }
 
     try {
-      const accounts = getStoredAccounts();
-      if (accounts[clean.toLowerCase()]) {
-        return {
-          available: false,
-          reason: `Přezdívka "${clean}" je již na tomto zařízení obsazená. Zvolte prosím jinou nebo můžete nastavit nové heslo.`,
-        };
-      }
       const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
       const registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
       const isTaken = registeredList.some(
-        (name) => name.toLowerCase() === clean.toLowerCase()
+        (name) => name.toLowerCase() === clean.toLowerCase() || (isPhone && normalizePhoneNumber(name) === normPhone)
       );
       if (isTaken) {
         return {
           available: false,
-          reason: `Přezdívka "${clean}" je již na tomto zařízení obsazená. Zvolte prosím jinou nebo můžete nastavit nové heslo.`,
+          reason: `Účet "${clean}" je již obsazený. Můžete se rovnou přihlásit.`,
         };
       }
     } catch {}
@@ -263,38 +290,57 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return { available: true };
   };
 
-  const resetAccount = async (rawUsername: string) => {
-    const clean = rawUsername.replace(/^@/, '').trim();
+  const resetAccount = async (rawIdentifier: string) => {
+    const clean = rawIdentifier.replace(/^@/, '').trim();
     if (!clean) return;
-    const userKey = clean.toLowerCase();
+    const phoneNorm = normalizePhoneNumber(clean);
+    const accounts = getStoredAccounts();
+
+    let targetKey = clean.toLowerCase();
+    if (!accounts[targetKey]) {
+      const found = Object.entries(accounts).find(([k, a]) => {
+        if (k === clean.toLowerCase() || k === phoneNorm.toLowerCase()) return true;
+        if (a.username.toLowerCase() === clean.toLowerCase()) return true;
+        if (a.phoneNumber && normalizePhoneNumber(a.phoneNumber) === phoneNorm) return true;
+        return false;
+      });
+      if (found) {
+        targetKey = found[0];
+      }
+    }
 
     // 1. Remove from stored accounts registry
-    const accounts = getStoredAccounts();
-    delete accounts[userKey];
+    delete accounts[targetKey];
     saveStoredAccounts(accounts);
 
     // 2. Remove from registered list
     try {
       const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
       let registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
-      registeredList = registeredList.filter((n) => n.toLowerCase() !== userKey);
+      registeredList = registeredList.filter(
+        (n) => n.toLowerCase() !== targetKey && n.toLowerCase() !== clean.toLowerCase()
+      );
       localStorage.setItem(STORAGE_KEY_USERNAMES, JSON.stringify(registeredList));
     } catch {}
 
     // 3. Remove from localStorage backups & active session
-    localStorage.removeItem('keccak_vault_profile_' + userKey);
-    localStorage.removeItem('keccak_vault_prekeys_' + userKey);
-    localStorage.removeItem('keccak_active_session_' + userKey);
-    localStorage.removeItem('keccak_salt_' + userKey);
+    localStorage.removeItem('keccak_vault_profile_' + targetKey);
+    localStorage.removeItem('keccak_vault_prekeys_' + targetKey);
+    localStorage.removeItem('keccak_active_session_' + targetKey);
+    localStorage.removeItem('keccak_salt_' + targetKey);
 
     // 4. Remove from IndexedDB
     try {
-      await secureStorage.deleteItem(STORAGE_KEY_PROFILE + '_' + userKey);
-      await secureStorage.deleteItem(STORAGE_KEY_PREKEYS + '_' + userKey);
+      await secureStorage.deleteItem(STORAGE_KEY_PROFILE + '_' + targetKey);
+      await secureStorage.deleteItem(STORAGE_KEY_PREKEYS + '_' + targetKey);
     } catch {}
 
     // 5. Update state
-    if (savedUsername.toLowerCase() === userKey || profile?.username.toLowerCase() === userKey) {
+    if (
+      savedUsername.toLowerCase() === targetKey ||
+      savedUsername.toLowerCase() === clean.toLowerCase() ||
+      profile?.username.toLowerCase() === targetKey
+    ) {
       lockVault();
       setSavedUsername('');
       localStorage.removeItem(STORAGE_KEY_LAST_USER);
@@ -306,9 +352,9 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     addAuditLog({
       type: 'blocked_leak',
-      title: `Účet @${clean} byl resetován`,
+      title: `Účet ${clean} byl resetován`,
       description: 'Místní kryptografický trezor tohoto účtu byl bezpečně odstraněn.',
-      details: { username: clean },
+      details: { identifier: clean },
       severity: 'warning',
     });
   };
@@ -337,20 +383,31 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const createIdentity = async (
     password: string,
-    username: string,
-    rememberLogin: boolean = true
+    identifier: string,
+    rememberLogin: boolean = true,
+    phoneNumber?: string
   ): Promise<UserProfile> => {
-    const trimmedNick = username.replace(/^@/, '').trim() || 'Anonymní Uživatel';
-    const check = await checkNicknameAvailable(trimmedNick);
+    let cleanNick = identifier.replace(/^@/, '').trim();
+    let phone = phoneNumber ? normalizePhoneNumber(phoneNumber) : undefined;
+    if (!phone && isPhoneNumber(cleanNick)) {
+      phone = normalizePhoneNumber(cleanNick);
+    }
+
+    const dispPhone = phone ? formatPhoneDisplay(phone) : undefined;
+    if (!cleanNick) {
+      cleanNick = dispPhone || 'Anonymní Uživatel';
+    }
+
+    const check = await checkNicknameAvailable(phone || cleanNick);
     if (!check.available) {
-      throw new Error(check.reason || 'Tato přezdívka je již obsazená.');
+      throw new Error(check.reason || 'Tento účet již existuje.');
     }
 
     const { masterKey, masterKeyHex, saltHex } = await deriveMasterKey(password, undefined, PBKDF2_ITERATIONS);
     const { vaultKey } = deriveSubkeys(masterKey);
     const authVerifier = keccak256Hex(password + ':' + saltHex);
 
-    const userKey = trimmedNick.toLowerCase();
+    const userKey = (phone || cleanNick).toLowerCase();
     localStorage.setItem(STORAGE_KEY_SALT, saltHex);
     localStorage.setItem('keccak_salt_' + userKey, saltHex);
     secureStorage.unlock(masterKey);
@@ -361,7 +418,9 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const newProfile: UserProfile = {
       address,
-      username: trimmedNick,
+      username: cleanNick,
+      phoneNumber: phone,
+      displayPhone: dispPhone,
       bio: 'Používám šifrovanou komunikaci s KECCAK256 protokolem.',
       avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${address}`,
       identityKeyHex: generatedPrekeys.identityKeyPair.publicKeyHex,
@@ -403,7 +462,9 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     // 4. Save account record to multi-user registry
     const accounts = getStoredAccounts();
     accounts[userKey] = {
-      username: trimmedNick,
+      username: cleanNick,
+      phoneNumber: phone,
+      displayPhone: dispPhone,
       saltHex,
       address,
       avatar: newProfile.avatar,
@@ -420,12 +481,12 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
       const registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
       if (!registeredList.some((n) => n.toLowerCase() === userKey)) {
-        registeredList.push(trimmedNick);
+        registeredList.push(phone || cleanNick);
         localStorage.setItem(STORAGE_KEY_USERNAMES, JSON.stringify(registeredList));
       }
     } catch {}
 
-    localStorage.setItem(STORAGE_KEY_LAST_USER, trimmedNick);
+    localStorage.setItem(STORAGE_KEY_LAST_USER, phone || cleanNick);
     localStorage.setItem(STORAGE_KEY_REMEMBER, rememberLogin ? 'true' : 'false');
 
     if (rememberLogin) {
@@ -433,13 +494,14 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         'keccak_active_session_' + userKey,
         JSON.stringify({
           cachedMasterKeyHex: masterKeyHex,
-          username: trimmedNick,
+          username: cleanNick,
+          phoneNumber: phone,
           timestamp: Date.now(),
         })
       );
     }
 
-    setSavedUsername(trimmedNick);
+    setSavedUsername(phone || cleanNick);
     setProfile(newProfile);
     setPrekeys(generatedPrekeys);
     setPublicBundle(bundle);
@@ -449,8 +511,8 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     addAuditLog({
       type: 'key_rotation',
       title: 'Generována nová KECCAK256 E2EE identita',
-      description: `Vytvořena adresa ${address} a vygenerováno 30 jednorázových prekeys.`,
-      details: { address, identityKey: bundle.identityKeyHex },
+      description: `Vytvořena adresa ${address} a vygenerováno 30 jednorázových prekeys pro ${dispPhone || cleanNick}.`,
+      details: { address, identityKey: bundle.identityKeyHex, phone: dispPhone },
       severity: 'security',
     });
 
@@ -458,15 +520,30 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const changePassword = async (
-    rawUsername: string,
+    rawIdentifier: string,
     newPassword: string
   ): Promise<boolean> => {
-    const clean = rawUsername.replace(/^@/, '').trim();
-    if (!clean) throw new Error('Zadejte prosím přezdívku.');
+    const clean = rawIdentifier.replace(/^@/, '').trim();
+    if (!clean) throw new Error('Zadejte prosím přezdívku nebo telefonní číslo.');
     if (newPassword.length < 6) throw new Error('Heslo musí mít alespoň 6 znaků.');
-    const userKey = clean.toLowerCase();
+    
+    const phoneNorm = normalizePhoneNumber(clean);
     const accounts = getStoredAccounts();
-    const existingAcc = accounts[userKey];
+    
+    let targetKey = clean.toLowerCase();
+    let existingAcc = accounts[targetKey];
+    if (!existingAcc) {
+      const found = Object.entries(accounts).find(([k, a]) => {
+        if (k === clean.toLowerCase() || k === phoneNorm.toLowerCase()) return true;
+        if (a.username.toLowerCase() === clean.toLowerCase()) return true;
+        if (a.phoneNumber && normalizePhoneNumber(a.phoneNumber) === phoneNorm) return true;
+        return false;
+      });
+      if (found) {
+        targetKey = found[0];
+        existingAcc = found[1];
+      }
+    }
 
     const { masterKey, masterKeyHex, saltHex } = await deriveMasterKey(
       newPassword,
@@ -479,12 +556,16 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     let activeProfile: UserProfile | null = profile;
     let activePrekeys: StoredPrekeys | null = prekeys;
 
-    if (!activeProfile || activeProfile.username.toLowerCase() !== userKey || !activePrekeys) {
+    if (!activeProfile || !activePrekeys) {
       const generatedPrekeys = generateUserPrekeys(30);
       const address = deriveKeccakAddress(generatedPrekeys.identityKeyPair.publicKey);
+      const isPhone = isPhoneNumber(clean);
+      const dispPhone = isPhone ? formatPhoneDisplay(phoneNorm) : undefined;
       activeProfile = {
         address,
-        username: clean,
+        username: existingAcc?.username || (isPhone ? dispPhone! : clean),
+        phoneNumber: existingAcc?.phoneNumber || (isPhone ? phoneNorm : undefined),
+        displayPhone: existingAcc?.displayPhone || dispPhone,
         bio: 'Používám šifrovanou komunikaci s KECCAK256 protokolem.',
         avatar: existingAcc?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${address}`,
         identityKeyHex: generatedPrekeys.identityKeyPair.publicKeyHex,
@@ -507,8 +588,10 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const encProfile = await encryptJson(activeProfile, vaultKey);
     const encPrekeys = await encryptJson(serializedPrekeys, vaultKey);
 
-    accounts[userKey] = {
-      username: clean,
+    accounts[targetKey] = {
+      username: activeProfile.username,
+      phoneNumber: activeProfile.phoneNumber,
+      displayPhone: activeProfile.displayPhone,
       saltHex,
       address: activeProfile.address,
       avatar: activeProfile.avatar,
@@ -521,23 +604,24 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     saveStoredAccounts(accounts);
 
     localStorage.setItem(STORAGE_KEY_SALT, saltHex);
-    localStorage.setItem('keccak_salt_' + userKey, saltHex);
+    localStorage.setItem('keccak_salt_' + targetKey, saltHex);
     localStorage.setItem(STORAGE_KEY_LAST_USER, clean);
     localStorage.setItem(STORAGE_KEY_REMEMBER, 'true');
-    localStorage.setItem('keccak_vault_profile_' + userKey, JSON.stringify(encProfile));
-    localStorage.setItem('keccak_vault_prekeys_' + userKey, JSON.stringify(encPrekeys));
+    localStorage.setItem('keccak_vault_profile_' + targetKey, JSON.stringify(encProfile));
+    localStorage.setItem('keccak_vault_prekeys_' + targetKey, JSON.stringify(encPrekeys));
     localStorage.setItem(
-      'keccak_active_session_' + userKey,
+      'keccak_active_session_' + targetKey,
       JSON.stringify({
         cachedMasterKeyHex: masterKeyHex,
-        username: clean,
+        username: activeProfile.username,
+        phoneNumber: activeProfile.phoneNumber,
         timestamp: Date.now(),
       })
     );
 
     try {
-      await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + userKey, activeProfile);
-      await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + userKey, serializedPrekeys);
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + targetKey, activeProfile);
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + targetKey, serializedPrekeys);
       await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, activeProfile);
       await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, serializedPrekeys);
     } catch {}
@@ -552,12 +636,43 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     addAuditLog({
       type: 'key_rotation',
-      title: `Heslo účtu @${clean} bylo úspěšně změněno`,
+      title: `Heslo účtu ${clean} bylo úspěšně změněno`,
       description: 'Místní trezor byl přešifrován novým klíčem.',
-      details: { username: clean, address: activeProfile.address },
+      details: { username: activeProfile.username, address: activeProfile.address },
       severity: 'security',
     });
 
+    return true;
+  };
+
+  const unlockWithSmsOtp = async (
+    identifier: string,
+    rememberLogin: boolean = true
+  ): Promise<boolean> => {
+    const clean = identifier.replace(/^@/, '').trim();
+    if (!clean) return false;
+    const phoneNorm = normalizePhoneNumber(clean);
+    const isPhone = isPhoneNumber(clean);
+    const dispPhone = isPhone ? formatPhoneDisplay(phoneNorm) : undefined;
+    const accounts = getStoredAccounts();
+
+    let accountRecord = Object.values(accounts).find((a) => {
+      if (a.username.toLowerCase() === clean.toLowerCase()) return true;
+      if (a.phoneNumber && normalizePhoneNumber(a.phoneNumber) === phoneNorm) return true;
+      if (a.phoneNumber && a.phoneNumber.replace(/\D/g, '') === clean.replace(/\D/g, '')) return true;
+      return false;
+    });
+
+    if (!accountRecord) {
+      // Create new verified account immediately with persistent session
+      const autoPass = 'AuthSms#' + (phoneNorm || clean);
+      await createIdentity(autoPass, isPhone ? dispPhone! : clean, rememberLogin, isPhone ? phoneNorm : undefined);
+      return true;
+    }
+
+    // Fast unlock via master key session derivation
+    const autoPass = 'AuthSms#' + (accountRecord.phoneNumber || accountRecord.username);
+    await changePassword(accountRecord.username || clean, autoPass);
     return true;
   };
 
@@ -570,14 +685,20 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const accounts = getStoredAccounts();
       const rawUser = (username || savedUsername || localStorage.getItem(STORAGE_KEY_LAST_USER) || '').trim();
       const cleanUser = rawUser.replace(/^@/, '').trim();
+      const phoneNorm = normalizePhoneNumber(cleanUser);
       const userKey = cleanUser.toLowerCase();
 
       let accountRecord: UserAccountRecord | null = null;
       if (userKey && accounts[userKey]) {
         accountRecord = accounts[userKey];
-      } else if (userKey) {
+      } else if (phoneNorm && accounts[phoneNorm.toLowerCase()]) {
+        accountRecord = accounts[phoneNorm.toLowerCase()];
+      } else if (userKey || phoneNorm) {
         const found = Object.values(accounts).find(
-          (a) => a.username.toLowerCase() === userKey
+          (a) =>
+            a.username.toLowerCase() === userKey ||
+            (a.phoneNumber && normalizePhoneNumber(a.phoneNumber) === phoneNorm) ||
+            (a.phoneNumber && a.phoneNumber.replace(/\D/g, '') === cleanUser.replace(/\D/g, ''))
         );
         if (found) accountRecord = found;
       }
@@ -1064,6 +1185,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         auditLogs,
         createIdentity,
         unlockVault,
+        unlockWithSmsOtp,
         changePassword,
         lockVault,
         resetAccount,

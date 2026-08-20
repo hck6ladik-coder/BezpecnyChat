@@ -125,9 +125,14 @@ export function createInviteLink(address: string, username?: string): string {
 }
 
 /**
- * Parses any user input: invite URL, short tag, @username or full k256 address
+ * Parses any user input: invite URL, phone number, short tag, @username or full k256 address
  */
-export function parseInviteInput(input: string): { address?: string; username?: string; shortTag?: string } {
+export function parseInviteInput(input: string): {
+  address?: string;
+  username?: string;
+  shortTag?: string;
+  phoneNumber?: string;
+} {
   const trimmed = input.trim();
 
   // 1. Check if it's an invite link
@@ -147,16 +152,30 @@ export function parseInviteInput(input: string): { address?: string; username?: 
     return { address: addr };
   }
 
-  // 3. Check if short tag (e.g. #8D7-2AB or 8D72AB or 8D7-2AB)
+  // 3. Check if phone number (e.g. +420 777 123 456 or 777123456)
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length >= 9 && /^[\+]?[\d\s\-\.\(\)]+$/.test(trimmed)) {
+    let norm = trimmed.replace(/[\s\-\.\(\)]/g, '');
+    if (norm.startsWith('00')) norm = '+' + norm.slice(2);
+    if (/^\d{9}$/.test(norm)) norm = '+420' + norm;
+    if (/^420\d{9}$/.test(norm)) norm = '+' + norm;
+    return {
+      phoneNumber: norm,
+      username: norm,
+    };
+  }
+
+  // 4. Check if short tag (e.g. #8D7-2AB or 8D72AB or 8D7-2AB)
   const cleanTag = trimmed.replace('#', '').replace('-', '').trim();
   if (cleanTag.length === 6 && /^[0-9a-fA-F]+$/.test(cleanTag)) {
     return { shortTag: cleanTag.toLowerCase() };
   }
 
-  // 4. Treat as username (e.g. @Honza or Honza)
+  // 5. Treat as username (e.g. @Honza or Honza)
   const cleanName = trimmed.replace('@', '').trim();
   return { username: cleanName };
 }
 
 export { bytesToHex, hexToBytes, utf8ToBytes };
+
 

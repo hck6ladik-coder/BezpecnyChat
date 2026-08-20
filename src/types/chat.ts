@@ -57,6 +57,8 @@ export interface ChatConversation {
 export interface UserProfile {
   address: string;
   username: string;
+  phoneNumber?: string;
+  displayPhone?: string;
   bio: string;
   avatar: string;
   identityKeyHex: string;
@@ -86,6 +88,7 @@ export interface WebRTCCallSession {
 export interface FriendContact {
   address: string;
   username: string;
+  phoneNumber?: string;
   shortTag: string;
   avatar: string;
   addedAt: number;

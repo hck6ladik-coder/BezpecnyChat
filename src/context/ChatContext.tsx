@@ -27,6 +27,8 @@ import { P2PMeshNetwork } from '../services/p2pMesh';
 export interface DiscoveredPeer {
   address: string;
   username: string;
+  phoneNumber?: string;
+  displayPhone?: string;
   avatar: string;
   bundle?: UserPrekeyBundle;
   lastSeen: number;
@@ -175,7 +177,15 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (exists) {
             return prev.map((p) =>
               p.address.toLowerCase() === data.address.toLowerCase()
-                ? { ...p, username: data.username, avatar: data.avatar, bundle: data.bundle, lastSeen: Date.now() }
+                ? {
+                    ...p,
+                    username: data.username,
+                    phoneNumber: data.phoneNumber,
+                    displayPhone: data.displayPhone,
+                    avatar: data.avatar,
+                    bundle: data.bundle,
+                    lastSeen: Date.now(),
+                  }
                 : p
             );
           }
@@ -184,6 +194,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             {
               address: data.address,
               username: data.username,
+              phoneNumber: data.phoneNumber,
+              displayPhone: data.displayPhone,
               avatar: data.avatar,
               bundle: data.bundle,
               lastSeen: Date.now(),
@@ -212,6 +224,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           type: 'peer_presence',
           address: currentProfile.address,
           username: currentProfile.username,
+          phoneNumber: currentProfile.phoneNumber,
+          displayPhone: currentProfile.displayPhone,
           avatar: currentProfile.avatar,
           bundle: publicBundleRef.current,
         });
@@ -341,6 +355,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           type: 'peer_presence',
           address: curProf.address,
           username: curProf.username,
+          phoneNumber: curProf.phoneNumber,
+          displayPhone: curProf.displayPhone,
           avatar: curProf.avatar,
           bundle: curBundle,
         });

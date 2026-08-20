@@ -18,6 +18,7 @@ import {
   createInviteLink,
   parseInviteInput,
 } from '../../crypto/keccak';
+import { formatPhoneDisplay } from '../../crypto/phone';
 
 interface NewContactModalProps {
   isOpen: boolean;
@@ -74,7 +75,25 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
     let targetAddress = parsed.address;
     let targetName = parsed.username || nicknameInput.trim() || undefined;
 
-    // 2. If short tag was given (e.g. #8D7-2AB or 8D72AB)
+    // 2. If phone number was given (e.g. +420 777 123 456 or 777123456)
+    if (!targetAddress && parsed.phoneNumber) {
+      const match = discoveredPeers.find((p) => {
+        return (
+          p.phoneNumber === parsed.phoneNumber ||
+          (p.phoneNumber && p.phoneNumber.replace(/\D/g, '') === parsed.phoneNumber?.replace(/\D/g, ''))
+        );
+      });
+      if (match) {
+        targetAddress = match.address;
+        targetName = match.username || formatPhoneDisplay(parsed.phoneNumber);
+      } else {
+        const cleanDigits = parsed.phoneNumber.replace(/\D/g, '');
+        targetAddress = `k256:0xphone_${cleanDigits}`;
+        targetName = nicknameInput.trim() || formatPhoneDisplay(parsed.phoneNumber);
+      }
+    }
+
+    // 3. If short tag was given (e.g. #8D7-2AB or 8D72AB)
     if (!targetAddress && parsed.shortTag) {
       const match = discoveredPeers.find((p) => {
         const tag = p.address.replace('k256:0x', '').slice(0, 6).toLowerCase();
@@ -93,7 +112,7 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
       }
     }
 
-    // 3. If username was given (e.g. @Honza or Honza)
+    // 4. If username was given (e.g. @Honza or Honza)
     if (!targetAddress && parsed.username) {
       const match = discoveredPeers.find(
         (p) => p.username.toLowerCase() === parsed.username?.toLowerCase()
@@ -108,7 +127,7 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
     }
 
     if (!targetAddress) {
-      setError('Nepodařilo se rozpoznat kontakt. Zkontrolujte zadaný kód nebo odkaz.');
+      setError('Nepodařilo se rozpoznat kontakt. Zkontrolujte zadané telefonní číslo, kód nebo odkaz.');
       return;
     }
 

@@ -88,8 +88,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
                   {formatKeccakAddress(profile.address)}
                 </span>
               </h3>
-              <p className="text-xs text-slate-400">
-                Šifrovaný profil v P2P síti
+              <p className="text-xs text-slate-400 flex items-center space-x-2 mt-0.5">
+                {profile.displayPhone && (
+                  <span className="text-cyber-300 font-mono font-medium">
+                    📱 {profile.displayPhone}
+                  </span>
+                )}
+                <span>• Šifrovaný profil v P2P síti</span>
               </p>
             </div>
           </div>
