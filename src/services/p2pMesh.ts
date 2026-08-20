@@ -1,25 +1,31 @@
 /**
- * Decentralized Zero-Registration P2P WebRTC Mesh Network
+ * Decentralized Zero-Registration P2P Multi-Broker Transport
  *
- * Uses PeerJS (0.peerjs.com + Google STUN) for direct browser-to-browser P2P DataChannels
- * across the global internet with ZERO registration, ZERO accounts, and ZERO cloud config.
- * Supports fallback to BroadcastChannel (local tabs) and local WebSocket relay.
+ * Connects any 2 computers or mobile devices worldwide with ZERO registration,
+ * ZERO cloud accounts, and ZERO server setup.
+ *
+ * Uses resilient public WSS brokers (EMQX & HiveMQ) + BroadcastChannel + Local WS.
+ * All messages are 100% End-to-End Encrypted (Double Ratchet + KECCAK-256 + AES-256-GCM).
  */
-import { Peer, DataConnection } from 'peerjs';
+import mqtt, { MqttClient } from 'mqtt';
 
 export type PacketHandler = (packet: any) => void;
 
+// Public high-availability WSS brokers (free, zero-registration, global reach)
+const PUBLIC_WSS_BROKERS = [
+  'wss://broker.emqx.io:8084/mqtt',
+  'wss://broker.hivemq.com:8884/mqtt',
+];
+
 export class P2PMeshNetwork {
-  private peer: Peer | null = null;
-  private connections: Map<string, DataConnection> = new Map();
-  private pendingPackets: Map<string, any[]> = new Map();
+  private mqttClients: MqttClient[] = [];
   private broadcastChannel: BroadcastChannel | null = null;
   private localWs: WebSocket | null = null;
   private onPacketCallback: PacketHandler | null = null;
   private myAddress: string = '';
   private myShortTag: string = '';
   private isDestroyed: boolean = false;
-  private pingInterval: any = null;
+  private processedPacketIds: Set<string> = new Set();
 
   constructor(myAddress: string, myShortTag: string, onPacket: PacketHandler) {
     this.myAddress = myAddress.toLowerCase();
@@ -28,32 +34,16 @@ export class P2PMeshNetwork {
 
     this.initBroadcastChannel();
     this.initLocalRelay();
-    this.initPeerJS();
-
-    // Keepalive ping for WebRTC connections
-    this.pingInterval = setInterval(() => {
-      this.connections.forEach((conn) => {
-        if (conn.open) {
-          try {
-            conn.send({ type: 'p2p_ping', timestamp: Date.now() });
-          } catch {}
-        }
-      });
-    }, 5000);
-  }
-
-  private getPrimaryPeerId(): string {
-    const tag = this.myAddress.replace('k256:0x', '').slice(0, 6).toLowerCase();
-    return `k256_${tag}`;
+    this.initPublicBrokers();
   }
 
   private initBroadcastChannel() {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v3');
+        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v4');
         this.broadcastChannel.onmessage = (e) => {
-          if (this.onPacketCallback && e.data && e.data.type !== 'p2p_ping') {
-            this.onPacketCallback(e.data);
+          if (this.onPacketCallback && e.data) {
+            this.handleIncoming(e.data);
           }
         };
       } catch (err) {
@@ -63,6 +53,10 @@ export class P2PMeshNetwork {
   }
 
   private initLocalRelay() {
+    if (typeof window === 'undefined') return;
+    // Only connect local ws if on http/localhost to prevent Mixed Content errors on HTTPS
+    if (window.location.protocol === 'https:') return;
+
     const host = window.location.hostname || 'localhost';
     const localUrl = `ws://${host}:8080`;
 
@@ -82,17 +76,13 @@ export class P2PMeshNetwork {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (this.onPacketCallback && data.type !== 'p2p_ping') {
-              this.onPacketCallback(data);
-            }
+            this.handleIncoming(data);
           } catch {}
         };
 
         ws.onclose = () => {
           this.localWs = null;
-          if (!this.isDestroyed) {
-            setTimeout(connect, 4000);
-          }
+          if (!this.isDestroyed) setTimeout(connect, 4000);
         };
 
         ws.onerror = () => {
@@ -104,205 +94,173 @@ export class P2PMeshNetwork {
     connect();
   }
 
-  private initPeerJS() {
+  private initPublicBrokers() {
+    PUBLIC_WSS_BROKERS.forEach((brokerUrl) => {
+      this.connectBroker(brokerUrl);
+    });
+  }
+
+  private connectBroker(brokerUrl: string) {
     if (this.isDestroyed) return;
 
     try {
-      const peerId = this.getPrimaryPeerId();
-      const p = new Peer(peerId, {
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-          ],
-        },
+      const clientId = `k256_${this.myShortTag}_${Math.random().toString(36).slice(2, 8)}`;
+      const client = mqtt.connect(brokerUrl, {
+        clientId,
+        keepalive: 30,
+        reconnectPeriod: 3000,
+        clean: true,
       });
 
-      this.peer = p;
+      this.mqttClients.push(client);
 
-      p.on('open', (id) => {
-        console.log('[P2P Mesh] Connected to global peer network with ID:', id);
-        // Announce presence locally
-        if (this.broadcastChannel) {
-          try {
-            this.broadcastChannel.postMessage({
+      client.on('connect', () => {
+        console.log(`[P2P Mesh] Connected to global broker: ${brokerUrl}`);
+
+        // Subscribe to:
+        // 1. Exact full address mailbox (e.g. keccak/box/k256:0x8d72ab...)
+        // 2. Short tag mailbox (e.g. keccak/box/8d72ab)
+        // 3. Global discovery channel
+        const topics = [
+          `keccak/box/${this.myAddress}`,
+          `keccak/box/${this.myShortTag}`,
+          'keccak/discovery',
+        ];
+
+        client.subscribe(topics, (err) => {
+          if (!err) {
+            console.log('[P2P Mesh] Subscribed to mailboxes:', topics);
+            // Announce presence across the network
+            this.broadcast({
               type: 'peer_presence',
               address: this.myAddress,
             });
-          } catch {}
+          }
+        });
+      });
+
+      client.on('message', (_topic, message) => {
+        try {
+          const parsed = JSON.parse(message.toString());
+          this.handleIncoming(parsed);
+        } catch (err) {
+          console.warn('[P2P Mesh] Failed to parse message:', err);
         }
       });
 
-      p.on('connection', (conn) => {
-        console.log('[P2P Mesh] Incoming connection from:', conn.peer);
-        this.setupConnection(conn);
-      });
-
-      p.on('error', (err: any) => {
-        console.warn('[P2P Mesh] Peer error:', err?.type || err);
-      });
-
-      p.on('disconnected', () => {
-        if (!this.isDestroyed && !p.destroyed) {
-          try {
-            p.reconnect();
-          } catch {}
-        }
+      client.on('error', (err) => {
+        console.warn(`[P2P Mesh] Broker error (${brokerUrl}):`, err);
       });
     } catch (err) {
-      console.warn('[P2P Mesh] PeerJS init error:', err);
+      console.warn(`[P2P Mesh] Init error (${brokerUrl}):`, err);
     }
   }
 
-  private setupConnection(conn: DataConnection) {
-    conn.on('open', () => {
-      console.log('[P2P Mesh] WebRTC DataChannel OPEN with:', conn.peer);
-      this.connections.set(conn.peer, conn);
+  private handleIncoming(packet: any) {
+    if (!packet || typeof packet !== 'object') return;
 
-      // Send our presence immediately to establish identity
-      try {
-        conn.send({
-          type: 'peer_presence',
-          address: this.myAddress,
-        });
-      } catch {}
-
-      // Flush any pending packets queued while connection was establishing
-      const pending = this.pendingPackets.get(conn.peer);
-      if (pending && pending.length > 0) {
-        console.log(`[P2P Mesh] Flushing ${pending.length} pending packets to ${conn.peer}`);
-        pending.forEach((pkt) => {
-          try {
-            conn.send(pkt);
-          } catch (e) {
-            console.error('[P2P Mesh] Error sending flushed packet:', e);
-          }
-        });
-        this.pendingPackets.delete(conn.peer);
+    // Deduplicate packets that arrive from multiple brokers or channels
+    if (packet.id) {
+      if (this.processedPacketIds.has(packet.id)) return;
+      this.processedPacketIds.add(packet.id);
+      // Keep deduplication set bounded
+      if (this.processedPacketIds.size > 2000) {
+        const first = Array.from(this.processedPacketIds).slice(0, 500);
+        first.forEach((id) => this.processedPacketIds.delete(id));
       }
-    });
+    }
 
-    conn.on('data', (data: any) => {
-      try {
-        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        if (parsed?.type === 'p2p_ping') return; // Ignore keepalives
-        if (this.onPacketCallback && parsed) {
-          this.onPacketCallback(parsed);
-        }
-      } catch {}
-    });
-
-    conn.on('close', () => {
-      console.log('[P2P Mesh] WebRTC DataChannel closed with:', conn.peer);
-      this.connections.delete(conn.peer);
-    });
-
-    conn.on('error', (err) => {
-      console.warn('[P2P Mesh] DataChannel error on', conn.peer, err);
-      this.connections.delete(conn.peer);
-    });
+    if (this.onPacketCallback) {
+      this.onPacketCallback(packet);
+    }
   }
 
-  private getTargetPeerId(targetAddressOrTag: string): string {
+  public sendDirectToPeer(targetAddressOrTag: string, packet: any) {
     const cleanTag = targetAddressOrTag
       .replace('k256:0x', '')
       .replace('#', '')
       .replace('-', '')
       .slice(0, 6)
       .toLowerCase();
-    return `k256_${cleanTag}`;
-  }
 
-  public sendDirectToPeer(targetAddressOrTag: string, packet: any) {
-    if (!this.peer || this.peer.destroyed) return;
+    const cleanAddress = targetAddressOrTag.toLowerCase();
+    const raw = JSON.stringify(packet);
 
-    const targetPeerId = this.getTargetPeerId(targetAddressOrTag);
-    if (targetPeerId === this.getPrimaryPeerId()) return; // Don't send to self
+    // Publish to both the full address topic AND the short tag topic
+    const targetTopics = [
+      `keccak/box/${cleanTag}`,
+      `keccak/box/${cleanAddress}`,
+    ];
 
-    const existing = this.connections.get(targetPeerId);
-
-    if (existing && existing.open) {
-      try {
-        existing.send(packet);
-        console.log('[P2P Mesh] Sent message directly to:', targetPeerId);
-        return;
-      } catch (err) {
-        console.warn('[P2P Mesh] Send failed, re-queueing:', err);
+    this.mqttClients.forEach((client) => {
+      if (client.connected) {
+        targetTopics.forEach((topic) => {
+          client.publish(topic, raw, { qos: 0 });
+        });
       }
-    }
+    });
 
-    // If connection not open or does not exist, queue packet and initiate connection
-    const queue = this.pendingPackets.get(targetPeerId) || [];
-    queue.push(packet);
-    this.pendingPackets.set(targetPeerId, queue);
-
-    if (!existing) {
-      try {
-        console.log('[P2P Mesh] Connecting to peer:', targetPeerId);
-        const conn = this.peer.connect(targetPeerId, { reliable: true });
-        this.setupConnection(conn);
-      } catch (err) {
-        console.warn('[P2P Mesh] Connect error:', err);
-      }
-    }
-  }
-
-  /**
-   * Broadcast packet across all local and P2P channels
-   */
-  public broadcast(packet: any) {
-    const raw = typeof packet === 'string' ? packet : JSON.stringify(packet);
-
-    // 1. BroadcastChannel (same browser tabs)
+    // Also send on BroadcastChannel for local tabs
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(packet);
       } catch {}
     }
 
-    // 2. Localhost WebSocket (if running locally)
+    // Also send on local WebSocket if available
     if (this.localWs && this.localWs.readyState === WebSocket.OPEN) {
       try {
         this.localWs.send(raw);
       } catch {}
     }
+  }
 
-    // 3. Direct WebRTC P2P target
+  /**
+   * Broadcast packet across all local and global P2P channels
+   */
+  public broadcast(packet: any) {
     const target = packet.recipientAddress || packet.targetHashedAddress;
     if (target && target.toLowerCase() !== this.myAddress) {
       this.sendDirectToPeer(target, packet);
+      return;
     }
 
-    // Also send to all established active direct connections
-    this.connections.forEach((conn) => {
-      if (conn.open) {
-        try {
-          conn.send(packet);
-        } catch {}
+    const raw = JSON.stringify(packet);
+
+    // Broadcast discovery / presence
+    this.mqttClients.forEach((client) => {
+      if (client.connected) {
+        client.publish('keccak/discovery', raw, { qos: 0 });
       }
     });
+
+    // Local BroadcastChannel
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage(packet);
+      } catch {}
+    }
+
+    // Local WS
+    if (this.localWs && this.localWs.readyState === WebSocket.OPEN) {
+      try {
+        this.localWs.send(raw);
+      } catch {}
+    }
   }
 
   public destroy() {
     this.isDestroyed = true;
-    if (this.pingInterval) clearInterval(this.pingInterval);
     if (this.broadcastChannel) {
       try { this.broadcastChannel.close(); } catch {}
     }
     if (this.localWs) {
       try { this.localWs.close(); } catch {}
     }
-    this.connections.forEach((c) => {
-      try { c.close(); } catch {}
+    this.mqttClients.forEach((client) => {
+      try { client.end(true); } catch {}
     });
-    this.connections.clear();
-    this.pendingPackets.clear();
-    if (this.peer && !this.peer.destroyed) {
-      try { this.peer.destroy(); } catch {}
-    }
-    this.peer = null;
+    this.mqttClients = [];
+    this.processedPacketIds.clear();
   }
 }

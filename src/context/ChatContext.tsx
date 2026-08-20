@@ -83,6 +83,12 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [discoveredPeers, setDiscoveredPeers] = useState<DiscoveredPeer[]>([]);
 
   const p2pMeshRef = useRef<P2PMeshNetwork | null>(null);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
+  const publicBundleRef = useRef(publicBundle);
+  publicBundleRef.current = publicBundle;
+  const activeConversationIdRef = useRef(activeConversationId);
+  activeConversationIdRef.current = activeConversationId;
 
   // Monitor network state
   useEffect(() => {
@@ -98,10 +104,11 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Handle incoming network packets from P2P mesh network
   const handleIncomingPacket = (data: any) => {
-    if (!data || !profile) return;
+    const currentProfile = profileRef.current;
+    if (!data || !currentProfile) return;
 
     if (data.type === 'peer_presence') {
-      if (data.address && data.address.toLowerCase() !== profile.address.toLowerCase()) {
+      if (data.address && data.address.toLowerCase() !== currentProfile.address.toLowerCase()) {
         setDiscoveredPeers((prev) => {
           const exists = prev.find((p) => p.address.toLowerCase() === data.address.toLowerCase());
           if (exists) {
@@ -126,19 +133,19 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (data.type === 'peer_query') {
-      if (profile && publicBundle && p2pMeshRef.current) {
+      if (currentProfile && publicBundleRef.current && p2pMeshRef.current) {
         p2pMeshRef.current.broadcast({
           type: 'peer_presence',
-          address: profile.address,
-          username: profile.username,
-          avatar: profile.avatar,
-          bundle: publicBundle,
+          address: currentProfile.address,
+          username: currentProfile.username,
+          avatar: currentProfile.avatar,
+          bundle: publicBundleRef.current,
         });
       }
     }
 
     if (data.type === 'direct_message') {
-      const myClean = profile.address.replace('k256:0x', '').toLowerCase();
+      const myClean = currentProfile.address.replace('k256:0x', '').toLowerCase();
       const recClean = data.recipientAddress?.replace('k256:0x', '').toLowerCase() || '';
       const isForMe =
         recClean === myClean ||
@@ -155,7 +162,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           conversationId: `conv_${data.senderAddress}`,
           senderAddress: data.senderAddress,
           senderName: data.senderName,
-          recipientAddress: profile.address,
+          recipientAddress: currentProfile.address,
           content: data.content,
           timestamp: data.timestamp || Date.now(),
           status: 'delivered',
@@ -204,7 +211,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     peerAddress: data.senderAddress,
                     name: getDisplayName(data.senderName || c.name, data.senderAddress),
                     lastMessage: incomingMsg,
-                    unreadCount: c.id === activeConversationId ? 0 : c.unreadCount + 1,
+                    unreadCount: c.id === activeConversationIdRef.current ? 0 : c.unreadCount + 1,
                   }
                 : c
             );
@@ -237,6 +244,9 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const handleIncomingRef = useRef(handleIncomingPacket);
+  handleIncomingRef.current = handleIncomingPacket;
+
   // Setup Decentralized Zero-Registration P2P Network Mesh
   useEffect(() => {
     if (!profile) return;
@@ -244,19 +254,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const mesh = new P2PMeshNetwork(
       profile.address,
       formatKeccakAddress(profile.address),
-      handleIncomingPacket
+      (data) => handleIncomingRef.current(data)
     );
     p2pMeshRef.current = mesh;
 
     // Heartbeat / Presence announcement interval across the P2P mesh
     const presenceInterval = setInterval(() => {
-      if (profile && publicBundle && p2pMeshRef.current) {
+      const curProf = profileRef.current;
+      const curBundle = publicBundleRef.current;
+      if (curProf && curBundle && p2pMeshRef.current) {
         p2pMeshRef.current.broadcast({
           type: 'peer_presence',
-          address: profile.address,
-          username: profile.username,
-          avatar: profile.avatar,
-          bundle: publicBundle,
+          address: curProf.address,
+          username: curProf.username,
+          avatar: curProf.avatar,
+          bundle: curBundle,
         });
       }
     }, 4000);
@@ -266,7 +278,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       mesh.destroy();
       p2pMeshRef.current = null;
     };
-  }, [profile, publicBundle]);
+  }, [profile?.address]);
 
   // Periodic tick for self-destructing message deletion
   useEffect(() => {
