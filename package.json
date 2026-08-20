@@ -1,0 +1,37 @@
+{
+  "name": "keccak-secure-chat",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "server": "tsx server/server.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^2.5.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.12",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.0",
+    "vitest": "^2.1.8"
+  }
+}

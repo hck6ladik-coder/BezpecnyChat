@@ -1,0 +1,20 @@
+# Tor Configuration for KECCAK256 E2EE Chat Hidden Service (.onion)
+# Provides network-layer anonymization and hides server/client IP addresses.
+
+# SOCKS5 Proxy for outgoing client traffic
+SOCKSPort 9050
+
+# Hidden Service for Zero-Metadata WebSocket Relay
+HiddenServiceDir /var/lib/tor/keccak_chat_service/
+HiddenServicePort 80 127.0.0.1:8080
+HiddenServiceVersion 3
+
+# Security & Anti-Fingerprinting Settings
+DataDirectory /var/lib/tor
+AvoidDiskWrites 1
+DisableDebuggerAttachment 1
+NumEntryGuards 3
+ClientOnly 0
+StrictNodes 0
+SafeLogging 1
+Log notice stderr
