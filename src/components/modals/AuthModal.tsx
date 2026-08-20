@@ -33,17 +33,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     profile,
     verify2FA,
     savedUsername,
+    savedAccounts,
     checkNicknameAvailable,
   } = useCrypto();
 
-  // Login form state
+  // Login form state (Classic login: Username + Password + Remember Me)
+  const [loginUsername, setLoginUsername] = useState(() => savedUsername || '');
   const [loginPassword, setLoginPassword] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(() => {
+    return localStorage.getItem('keccak_remember_login') !== 'false';
+  });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   // Registration form state
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [regRemember, setRegRemember] = useState(true);
   const [isRegistering, setIsRegistering] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [nickStatus, setNickStatus] = useState<{
@@ -57,6 +63,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [needs2FA, setNeeds2FA] = useState(false);
   const [is2FALoading, setIs2FALoading] = useState(false);
   const [twoFAError, setTwoFAError] = useState<string | null>(null);
+
+  // Sync saved username into login field if empty
+  useEffect(() => {
+    if (savedUsername && !loginUsername) {
+      setLoginUsername(savedUsername);
+    }
+  }, [savedUsername]);
 
   // Debounced real-time nickname uniqueness check
   useEffect(() => {
@@ -110,18 +123,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
+
+    const trimmedUser = loginUsername.trim();
+    if (!trimmedUser) {
+      setLoginError('Zadejte prosím vaše uživatelské jméno / přezdívku.');
+      return;
+    }
+
+    if (!loginPassword) {
+      setLoginError('Zadejte prosím heslo k účtu.');
+      return;
+    }
+
     setIsLoggingIn(true);
 
     try {
-      if (!loginPassword) {
-        setLoginError('Zadejte prosím heslo.');
-        setIsLoggingIn(false);
-        return;
-      }
-
-      const success = await unlockVault(loginPassword);
+      const success = await unlockVault(loginPassword, trimmedUser, rememberLogin);
       if (!success) {
-        setLoginError('Nesprávné heslo nebo účet nebyl nalezen.');
+        setLoginError('Nesprávné heslo nebo zadané uživatelské jméno neexistuje.');
         setIsLoggingIn(false);
         return;
       }
@@ -132,6 +151,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         return;
       }
 
+      setLoginPassword('');
+      setLoginError(null);
       onClose();
     } catch (err: any) {
       setLoginError(err.message || 'Chyba při přihlašování.');
@@ -144,22 +165,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError(null);
+
+    const trimmedNick = regUsername.trim();
+    if (!trimmedNick) {
+      setRegError('Zadejte prosím požadovanou přezdívku.');
+      return;
+    }
+
+    if (!regPassword || regPassword.length < 6) {
+      setRegError('Heslo k účtu musí mít alespoň 6 znaků.');
+      return;
+    }
+
     setIsRegistering(true);
 
     try {
-      const trimmedNick = regUsername.trim();
-      if (!trimmedNick) {
-        setRegError('Zadejte prosím požadovanou přezdívku.');
-        setIsRegistering(false);
-        return;
-      }
-
-      if (!regPassword || regPassword.length < 6) {
-        setRegError('Heslo k účtu musí mít alespoň 6 znaků.');
-        setIsRegistering(false);
-        return;
-      }
-
       const check = await checkNicknameAvailable(trimmedNick);
       if (!check.available) {
         setRegError(check.reason || `Přezdívka "${trimmedNick}" je již obsazená!`);
@@ -167,7 +187,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         return;
       }
 
-      await createIdentity(regPassword, trimmedNick);
+      await createIdentity(regPassword, trimmedNick, regRemember);
+      setRegPassword('');
+      setRegUsername('');
+      setRegError(null);
       onClose();
     } catch (err: any) {
       setRegError(err.message || 'Chyba při registraci.');
@@ -218,7 +241,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const siweMsg = formatSiweMessage(siweData);
       const sig = signSiweMessage(siweMsg, tempKey.privateKey);
 
-      await createIdentity(`siwe_${sig.signatureHex.slice(0, 32)}`, 'Web3 Uživatel');
+      await createIdentity(`siwe_${sig.signatureHex.slice(0, 32)}`, 'Web3 Uživatel', true);
       onClose();
     } catch (err: any) {
       setLoginError(err.message || 'Web3 přihlášení selhalo.');
@@ -280,9 +303,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         ) : (
           <div className="space-y-6">
             {/* ======================================================== */}
-            {/* 1. PRIMÁRNÍ SEKCE: PŘIHLÁŠENÍ DO EXISTUJÍCÍHO ÚČTU       */}
+            {/* 1. PRIMÁRNÍ SEKCE: KLASICKÝ LOGIN (JMÉNO + HESLO)        */}
             {/* ======================================================== */}
-            <div className="p-4 sm:p-5 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3 shadow-inner">
+            <div className="p-4 sm:p-5 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3.5 shadow-inner">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <div className="p-1.5 rounded-lg bg-cyber-500/10 text-cyber-400 border border-cyber-500/20">
@@ -293,9 +316,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                       Přihlášení do účtu
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      {savedUsername
-                        ? `Uložený profil: @${savedUsername}`
-                        : 'Odemkněte svůj zašifrovaný trezor'}
+                      Zadejte své uživatelské jméno a heslo
                     </p>
                   </div>
                 </div>
@@ -314,7 +335,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               )}
 
               <form onSubmit={handleLoginSubmit} className="space-y-3 pt-1">
+                {/* Username Input */}
                 <div>
+                  <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                    Uživatelské jméno / Přezdívka
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="např. Honza, David..."
+                      value={loginUsername}
+                      onChange={(e) => setLoginUsername(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyber-500/60 focus:ring-1 focus:ring-cyber-500/30 transition-all"
+                    />
+                  </div>
+
+                  {/* Quick select from saved accounts */}
+                  {savedAccounts && savedAccounts.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                      <span className="text-[10px] text-slate-500">Účty v paměti:</span>
+                      {savedAccounts.map((acc) => (
+                        <button
+                          key={acc.username}
+                          type="button"
+                          onClick={() => setLoginUsername(acc.username)}
+                          className={`text-[10px] px-2 py-0.5 rounded-md border transition-all ${
+                            loginUsername.toLowerCase() === acc.username.toLowerCase()
+                              ? 'bg-cyber-500/20 text-cyber-300 border-cyber-500/40 font-semibold'
+                              : 'bg-slate-850 text-slate-400 border-slate-700 hover:text-slate-200'
+                          }`}
+                        >
+                          @{acc.username}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Password Input */}
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-300 mb-1">
+                    Heslo k účtu
+                  </label>
                   <input
                     type="password"
                     placeholder="Zadejte heslo k vašemu účtu..."
@@ -322,6 +384,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     onChange={(e) => setLoginPassword(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyber-500/60 focus:ring-1 focus:ring-cyber-500/30 transition-all"
                   />
+                </div>
+
+                {/* Remember Me Checkbox */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={rememberLogin}
+                      onChange={(e) => setRememberLogin(e.target.checked)}
+                      className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-cyber-500 focus:ring-cyber-500/30 accent-cyber-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-slate-300">
+                      Uložit přihlášení (Pamatovat si mě)
+                    </span>
+                  </label>
                 </div>
 
                 <button
@@ -337,7 +414,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   ) : (
                     <>
                       <Unlock className="w-3.5 h-3.5" />
-                      <span>Přihlásit se a Otevřít Chat</span>
+                      <span>Přihlásit se do účtu</span>
                     </>
                   )}
                 </button>
@@ -357,7 +434,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             {/* ======================================================== */}
             {/* 2. REGISTRACE NOVÉHO ÚČTU (S KONTROLOU DUPLICITNÍCH NICKŮ) */}
             {/* ======================================================== */}
-            <div className="p-4 sm:p-5 bg-slate-950/40 border border-slate-800/80 rounded-2xl space-y-3">
+            <div className="p-4 sm:p-5 bg-slate-950/40 border border-slate-800/80 rounded-2xl space-y-3.5">
               <div className="flex items-center space-x-2">
                 <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <UserPlus className="w-4 h-4" />
@@ -432,6 +509,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     <ShieldCheck className="w-3 h-3" />
                     <span>Automatické vytvoření KECCAK-256 E2EE klíčů</span>
                   </div>
+                </div>
+
+                {/* Remember Me for Registration */}
+                <div className="flex items-center justify-between pt-0.5">
+                  <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={regRemember}
+                      onChange={(e) => setRegRemember(e.target.checked)}
+                      className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-slate-300">
+                      Uložit přihlášení (Pamatovat si mě)
+                    </span>
+                  </label>
                 </div>
 
                 <button

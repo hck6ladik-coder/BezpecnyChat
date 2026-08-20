@@ -27,6 +27,13 @@ const MainAppContent: React.FC = () => {
   const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
   const [inspectedMessage, setInspectedMessage] = useState<ChatMessage | null>(null);
 
+  // Automatically open auth modal when locked or logged out
+  useEffect(() => {
+    if (!isUnlocked) {
+      setIsAuthOpen(true);
+    }
+  }, [isUnlocked]);
+
   // Auto-connect when opened via an invite link (#invite?addr=...&name=...)
   useEffect(() => {
     if (isUnlocked && window.location.hash.includes('invite')) {
