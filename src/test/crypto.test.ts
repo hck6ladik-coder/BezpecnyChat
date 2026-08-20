@@ -280,4 +280,36 @@ describe('Authentication, SIWE & 2FA TOTP', () => {
     expect(isBackupValid).toBe(true);
     expect(remainingHashes.length).toBe(totpSetup.backupCodeHashes.length - 1);
   });
+
+  it('securely encrypts and restores account vault across logout and login', async () => {
+    // 1. Simulate registration of User "David"
+    const password = 'TajneHeslo123!';
+    const { masterKey, saltHex } = await deriveMasterKey(password);
+    const { vaultKey } = deriveSubkeys(masterKey);
+
+    const userProfile = {
+      address: 'k256:0x1111222233334444555566667777888899990000',
+      username: 'David',
+      bio: 'Bezpečný profil',
+      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=david',
+      createdAt: Date.now(),
+    };
+
+    const encPayload = await encryptJson(userProfile, vaultKey);
+    expect(encPayload.ciphertextHex).toBeDefined();
+
+    // 2. Simulate login with correct password
+    const loginDerivation = await deriveMasterKey(password, saltHex);
+    const loginSubkeys = deriveSubkeys(loginDerivation.masterKey);
+    const decryptedProfile = await decryptJson<typeof userProfile>(encPayload, loginSubkeys.vaultKey);
+    expect(decryptedProfile.username).toBe('David');
+    expect(decryptedProfile.address).toBe(userProfile.address);
+
+    // 3. Simulate login with incorrect password -> MUST throw / fail authentication
+    const wrongDerivation = await deriveMasterKey('SpatneHeslo!', saltHex);
+    const wrongSubkeys = deriveSubkeys(wrongDerivation.masterKey);
+    await expect(
+      decryptJson(encPayload, wrongSubkeys.vaultKey)
+    ).rejects.toThrow();
+  });
 });

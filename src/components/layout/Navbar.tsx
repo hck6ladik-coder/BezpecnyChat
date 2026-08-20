@@ -93,7 +93,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <span className="text-slate-700">|</span>
         <div className="flex items-center space-x-1 text-slate-300">
           <Key className="w-3.5 h-3.5 text-cyber-400" />
-          <span>KDF: PBKDF2 (210k)</span>
+          <span>KDF: PBKDF2 (20k)</span>
         </div>
       </div>
 

@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { UserProfile, SecurityAuditEntry } from '../types/chat';
 import { deriveKeccakAddress, bytesToHex, hexToBytes, keccak256Hex } from '../crypto/keccak';
-import { deriveMasterKey } from '../crypto/kdf';
+import { deriveMasterKey, deriveSubkeys } from '../crypto/kdf';
+import { encryptJson, decryptJson, EncryptedPayload } from '../crypto/aes';
 import {
   StoredPrekeys,
   UserPrekeyBundle,
@@ -29,7 +30,9 @@ export interface UserAccountRecord {
   saltHex: string;
   address: string;
   avatar: string;
-  authVerifier: string;
+  authVerifier?: string;
+  encryptedProfile?: EncryptedPayload;
+  encryptedPrekeys?: EncryptedPayload;
   createdAt: number;
   rememberLogin?: boolean;
 }
@@ -137,7 +140,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const checkNicknameAvailable = async (
     rawUsername: string
   ): Promise<{ available: boolean; reason?: string }> => {
-    const clean = rawUsername.trim();
+    const clean = rawUsername.replace(/^@/, '').trim();
     if (!clean) {
       return { available: false, reason: 'Zadejte prosím přezdívku.' };
     }
@@ -177,13 +180,14 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     username: string,
     rememberLogin: boolean = true
   ): Promise<UserProfile> => {
-    const trimmedNick = username.trim() || 'Anonymní Uživatel';
+    const trimmedNick = username.replace(/^@/, '').trim() || 'Anonymní Uživatel';
     const check = await checkNicknameAvailable(trimmedNick);
     if (!check.available) {
       throw new Error(check.reason || 'Tato přezdívka je již obsazená.');
     }
 
     const { masterKey, saltHex } = await deriveMasterKey(password);
+    const { vaultKey } = deriveSubkeys(masterKey);
     const authVerifier = keccak256Hex(password + ':' + saltHex);
 
     localStorage.setItem(STORAGE_KEY_SALT, saltHex);
@@ -215,12 +219,28 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
 
     const userKey = trimmedNick.toLowerCase();
-    await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + userKey, newProfile);
-    await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + userKey, serializedPrekeys);
-    await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, newProfile);
-    await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, serializedPrekeys);
 
-    // Save account record to multi-user registry
+    // 1. Encrypt payloads for multi-layer storage
+    const encProfile = await encryptJson(newProfile, vaultKey);
+    const encPrekeys = await encryptJson(serializedPrekeys, vaultKey);
+
+    // 2. Save into IndexedDB (per-user + default)
+    try {
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + userKey, newProfile);
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + userKey, serializedPrekeys);
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, newProfile);
+      await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, serializedPrekeys);
+    } catch (idbErr) {
+      console.warn('IndexedDB write warning:', idbErr);
+    }
+
+    // 3. Save into localStorage backup
+    try {
+      localStorage.setItem('keccak_vault_profile_' + userKey, JSON.stringify(encProfile));
+      localStorage.setItem('keccak_vault_prekeys_' + userKey, JSON.stringify(encPrekeys));
+    } catch {}
+
+    // 4. Save account record to multi-user registry
     const accounts = getStoredAccounts();
     accounts[userKey] = {
       username: trimmedNick,
@@ -228,12 +248,14 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       address,
       avatar: newProfile.avatar,
       authVerifier,
+      encryptedProfile: encProfile,
+      encryptedPrekeys: encPrekeys,
       createdAt: Date.now(),
       rememberLogin,
     };
     saveStoredAccounts(accounts);
 
-    // Save to registered usernames list
+    // 5. Save to registered usernames list
     try {
       const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
       const registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
@@ -244,11 +266,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     } catch {}
 
     localStorage.setItem(STORAGE_KEY_LAST_USER, trimmedNick);
-    if (rememberLogin) {
-      localStorage.setItem(STORAGE_KEY_REMEMBER, 'true');
-    } else {
-      localStorage.setItem(STORAGE_KEY_REMEMBER, 'false');
-    }
+    localStorage.setItem(STORAGE_KEY_REMEMBER, rememberLogin ? 'true' : 'false');
 
     setSavedUsername(trimmedNick);
     setProfile(newProfile);
@@ -275,71 +293,143 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   ): Promise<boolean> => {
     try {
       const accounts = getStoredAccounts();
-      let targetNick = (username || savedUsername || localStorage.getItem(STORAGE_KEY_LAST_USER) || '').trim();
-      
+      const rawUser = (username || savedUsername || localStorage.getItem(STORAGE_KEY_LAST_USER) || '').trim();
+      const cleanUser = rawUser.replace(/^@/, '').trim();
+      const userKey = cleanUser.toLowerCase();
+
       let saltHex: string | null = null;
       let accountRecord: UserAccountRecord | null = null;
 
-      if (targetNick && accounts[targetNick.toLowerCase()]) {
-        accountRecord = accounts[targetNick.toLowerCase()];
+      // Find user account in registry
+      if (userKey && accounts[userKey]) {
+        accountRecord = accounts[userKey];
         saltHex = accountRecord.saltHex;
-      } else {
-        // If single account or fallback
+      } else if (userKey) {
+        // Case-insensitive fallback
+        const found = Object.values(accounts).find(
+          (a) => a.username.toLowerCase() === userKey
+        );
+        if (found) {
+          accountRecord = found;
+          saltHex = found.saltHex;
+        }
+      }
+
+      // If no direct account record, try single account or global salt
+      if (!saltHex) {
         const accountKeys = Object.keys(accounts);
         if (accountKeys.length === 1) {
           accountRecord = accounts[accountKeys[0]];
           saltHex = accountRecord.saltHex;
-          targetNick = accountRecord.username;
         } else {
           saltHex = localStorage.getItem(STORAGE_KEY_SALT);
         }
       }
 
-      if (!saltHex) return false;
-
-      // Check authVerifier if available
-      if (accountRecord && accountRecord.authVerifier) {
-        const testVerifier = keccak256Hex(password + ':' + saltHex);
-        if (testVerifier !== accountRecord.authVerifier) {
-          return false;
-        }
+      if (!saltHex) {
+        console.warn('UnlockVault: No salt found for user', cleanUser);
+        return false;
       }
 
+      // Derive master key and vault encryption key
       const { masterKey } = await deriveMasterKey(password, saltHex);
+      const { vaultKey } = deriveSubkeys(masterKey);
       secureStorage.unlock(masterKey);
 
-      const userKey = targetNick ? targetNick.toLowerCase() : '';
-      let loadedProfile = userKey
-        ? await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE + '_' + userKey)
-        : null;
+      // --- Multi-layer Profile Decryption ---
+      let loadedProfile: UserProfile | null = null;
 
-      if (!loadedProfile) {
-        loadedProfile = await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE);
+      // Layer 1: IndexedDB user-specific key
+      if (userKey) {
+        try {
+          loadedProfile = await secureStorage.getEncryptedItem<UserProfile>(
+            STORAGE_KEY_PROFILE + '_' + userKey
+          );
+        } catch {}
       }
 
-      let loadedPrekeysRaw = userKey
-        ? await secureStorage.getEncryptedItem<{
+      // Layer 2: IndexedDB global key
+      if (!loadedProfile) {
+        try {
+          loadedProfile = await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE);
+        } catch {}
+      }
+
+      // Layer 3: accountRecord encryptedProfile from localStorage
+      if (!loadedProfile && accountRecord?.encryptedProfile) {
+        try {
+          loadedProfile = await decryptJson<UserProfile>(accountRecord.encryptedProfile, vaultKey);
+        } catch {}
+      }
+
+      // Layer 4: localStorage standalone encrypted backup
+      if (!loadedProfile && userKey) {
+        try {
+          const rawBackup = localStorage.getItem('keccak_vault_profile_' + userKey);
+          if (rawBackup) {
+            const parsed = JSON.parse(rawBackup) as EncryptedPayload;
+            loadedProfile = await decryptJson<UserProfile>(parsed, vaultKey);
+          }
+        } catch {}
+      }
+
+      // --- Multi-layer Prekeys Decryption ---
+      let loadedPrekeysRaw: {
+        identityKeyPair: StoredPrekeys['identityKeyPair'];
+        signingKeyPair: StoredPrekeys['signingKeyPair'];
+        signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
+        oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
+      } | null = null;
+
+      // Layer 1: IndexedDB user-specific key
+      if (userKey) {
+        try {
+          loadedPrekeysRaw = await secureStorage.getEncryptedItem<{
             identityKeyPair: StoredPrekeys['identityKeyPair'];
             signingKeyPair: StoredPrekeys['signingKeyPair'];
             signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
             oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
-          }>(STORAGE_KEY_PREKEYS + '_' + userKey)
-        : null;
-
-      if (!loadedPrekeysRaw) {
-        loadedPrekeysRaw = await secureStorage.getEncryptedItem<{
-          identityKeyPair: StoredPrekeys['identityKeyPair'];
-          signingKeyPair: StoredPrekeys['signingKeyPair'];
-          signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
-          oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
-        }>(STORAGE_KEY_PREKEYS);
+          }>(STORAGE_KEY_PREKEYS + '_' + userKey);
+        } catch {}
       }
 
+      // Layer 2: IndexedDB global key
+      if (!loadedPrekeysRaw) {
+        try {
+          loadedPrekeysRaw = await secureStorage.getEncryptedItem<{
+            identityKeyPair: StoredPrekeys['identityKeyPair'];
+            signingKeyPair: StoredPrekeys['signingKeyPair'];
+            signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
+            oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
+          }>(STORAGE_KEY_PREKEYS);
+        } catch {}
+      }
+
+      // Layer 3: accountRecord encryptedPrekeys from localStorage
+      if (!loadedPrekeysRaw && accountRecord?.encryptedPrekeys) {
+        try {
+          loadedPrekeysRaw = await decryptJson(accountRecord.encryptedPrekeys, vaultKey);
+        } catch {}
+      }
+
+      // Layer 4: localStorage standalone encrypted backup
+      if (!loadedPrekeysRaw && userKey) {
+        try {
+          const rawBackup = localStorage.getItem('keccak_vault_prekeys_' + userKey);
+          if (rawBackup) {
+            const parsed = JSON.parse(rawBackup) as EncryptedPayload;
+            loadedPrekeysRaw = await decryptJson(parsed, vaultKey);
+          }
+        } catch {}
+      }
+
+      // If decryption failed or no records exist (AES-GCM tag mismatch on wrong password)
       if (!loadedProfile || !loadedPrekeysRaw) {
         secureStorage.lock();
         return false;
       }
 
+      // Reconstruct cryptographic prekeys bundle
       const reconstructedPrekeys: StoredPrekeys = {
         identityKeyPair: loadedPrekeysRaw.identityKeyPair,
         signingKeyPair: loadedPrekeysRaw.signingKeyPair,
@@ -348,33 +438,42 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       };
 
       const bundle = createPublicPrekeyBundle(reconstructedPrekeys);
+      const finalUsername = loadedProfile.username || cleanUser || accountRecord?.username || 'Uživatel';
+      const finalKey = finalUsername.toLowerCase();
 
-      const finalUsername = loadedProfile.username || targetNick;
-      if (finalUsername) {
-        setSavedUsername(finalUsername);
-        localStorage.setItem(STORAGE_KEY_LAST_USER, finalUsername);
+      // Synchronize & Heal account records in both storages
+      const encProfileFresh = await encryptJson(loadedProfile, vaultKey);
+      const encPrekeysFresh = await encryptJson(loadedPrekeysRaw, vaultKey);
 
-        // Migrate to account registry if not present
-        if (!accounts[finalUsername.toLowerCase()]) {
-          accounts[finalUsername.toLowerCase()] = {
-            username: finalUsername,
-            saltHex,
-            address: loadedProfile.address,
-            avatar: loadedProfile.avatar,
-            authVerifier: keccak256Hex(password + ':' + saltHex),
-            createdAt: Date.now(),
-            rememberLogin,
-          };
-          saveStoredAccounts(accounts);
-        }
-      }
+      accounts[finalKey] = {
+        username: finalUsername,
+        saltHex,
+        address: loadedProfile.address,
+        avatar: loadedProfile.avatar,
+        authVerifier: keccak256Hex(password + ':' + saltHex),
+        encryptedProfile: encProfileFresh,
+        encryptedPrekeys: encPrekeysFresh,
+        createdAt: accountRecord?.createdAt || Date.now(),
+        rememberLogin,
+      };
+      saveStoredAccounts(accounts);
 
-      if (rememberLogin) {
-        localStorage.setItem(STORAGE_KEY_REMEMBER, 'true');
-      } else {
-        localStorage.setItem(STORAGE_KEY_REMEMBER, 'false');
-      }
+      // Keep localStorage in sync
+      localStorage.setItem(STORAGE_KEY_SALT, saltHex);
+      localStorage.setItem(STORAGE_KEY_LAST_USER, finalUsername);
+      localStorage.setItem(STORAGE_KEY_REMEMBER, rememberLogin ? 'true' : 'false');
+      localStorage.setItem('keccak_vault_profile_' + finalKey, JSON.stringify(encProfileFresh));
+      localStorage.setItem('keccak_vault_prekeys_' + finalKey, JSON.stringify(encPrekeysFresh));
 
+      // Resync IndexedDB
+      try {
+        await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + finalKey, loadedProfile);
+        await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + finalKey, loadedPrekeysRaw);
+        await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, loadedProfile);
+        await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, loadedPrekeysRaw);
+      } catch {}
+
+      setSavedUsername(finalUsername);
       setProfile(loadedProfile);
       setPrekeys(reconstructedPrekeys);
       setPublicBundle(bundle);
@@ -383,8 +482,8 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       addAuditLog({
         type: 'handshake',
         title: 'Trezor úspěšně odemčen',
-        description: 'Všechny kryptografické klíče byly načteny z paměti po PBKDF2 derivaci.',
-        details: { address: loadedProfile.address },
+        description: 'Všechny kryptografické klíče byly načteny a ověřeny z paměti po PBKDF2 derivaci.',
+        details: { address: loadedProfile.address, username: finalUsername },
         severity: 'success',
       });
 
@@ -426,7 +525,21 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       oneTimePrekeyPairs: Array.from(newPrekeys.oneTimePrekeyPairs.entries()),
     };
 
+    const userKey = profile.username.toLowerCase();
+    await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS + '_' + userKey, serializedPrekeys);
     await secureStorage.saveEncryptedItem(STORAGE_KEY_PREKEYS, serializedPrekeys);
+
+    const vaultKey = secureStorage.getVaultKey();
+    if (vaultKey) {
+      const encPrekeys = await encryptJson(serializedPrekeys, vaultKey);
+      const accounts = getStoredAccounts();
+      if (accounts[userKey]) {
+        accounts[userKey].encryptedPrekeys = encPrekeys;
+        saveStoredAccounts(accounts);
+      }
+      localStorage.setItem('keccak_vault_prekeys_' + userKey, JSON.stringify(encPrekeys));
+    }
+
     setPrekeys(newPrekeys);
     setPublicBundle(bundle);
 
@@ -447,7 +560,21 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       totpSecretHex: secretHex,
       backupCodeHashes: backupHashes,
     };
+    const userKey = profile.username.toLowerCase();
+    await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + userKey, updated);
     await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, updated);
+
+    const vaultKey = secureStorage.getVaultKey();
+    if (vaultKey) {
+      const encProf = await encryptJson(updated, vaultKey);
+      const accounts = getStoredAccounts();
+      if (accounts[userKey]) {
+        accounts[userKey].encryptedProfile = encProf;
+        saveStoredAccounts(accounts);
+      }
+      localStorage.setItem('keccak_vault_profile_' + userKey, JSON.stringify(encProf));
+    }
+
     setProfile(updated);
 
     addAuditLog({
@@ -467,7 +594,21 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       totpSecretHex: undefined,
       backupCodeHashes: undefined,
     };
+    const userKey = profile.username.toLowerCase();
+    await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE + '_' + userKey, updated);
     await secureStorage.saveEncryptedItem(STORAGE_KEY_PROFILE, updated);
+
+    const vaultKey = secureStorage.getVaultKey();
+    if (vaultKey) {
+      const encProf = await encryptJson(updated, vaultKey);
+      const accounts = getStoredAccounts();
+      if (accounts[userKey]) {
+        accounts[userKey].encryptedProfile = encProf;
+        saveStoredAccounts(accounts);
+      }
+      localStorage.setItem('keccak_vault_profile_' + userKey, JSON.stringify(encProf));
+    }
+
     setProfile(updated);
   };
 

@@ -55,6 +55,10 @@ export class SecureStorage {
     return this.vaultKey !== null;
   }
 
+  public getVaultKey(): Uint8Array | null {
+    return this.vaultKey;
+  }
+
   public async saveEncryptedItem<T>(key: string, data: T): Promise<void> {
     if (!this.vaultKey) {
       throw new Error('Vault is locked. Cannot save encrypted data.');

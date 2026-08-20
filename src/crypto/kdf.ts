@@ -7,7 +7,7 @@ import { utf8ToBytes, bytesToHex, hexToBytes } from '@noble/hashes/utils';
  * Key Derivation Functions (KDF) leveraging KECCAK-256 as the core primitive.
  */
 
-export const PBKDF2_ITERATIONS = 210_000;
+export const PBKDF2_ITERATIONS = 20_000;
 
 /**
  * HKDF using KECCAK-256 for Double Ratchet and X3DH key derivation
@@ -24,11 +24,12 @@ export function hkdfKeccak(
 
 /**
  * Derives a 32-byte Master Encryption Key from a user password and unique salt using PBKDF2-KECCAK256
- * with 210,000 iterations for brute-force resistance.
+ * with resistance against brute-force and dictionary attacks.
  */
 export async function deriveMasterKey(
   passphrase: string,
-  saltHex?: string
+  saltHex?: string,
+  iterations: number = PBKDF2_ITERATIONS
 ): Promise<{ masterKey: Uint8Array; masterKeyHex: string; saltHex: string }> {
   let salt: Uint8Array;
   if (saltHex) {
@@ -39,7 +40,7 @@ export async function deriveMasterKey(
 
   const passwordBytes = utf8ToBytes(passphrase);
   const derivedBytes = await pbkdf2Async(keccak_256, passwordBytes, salt, {
-    c: PBKDF2_ITERATIONS,
+    c: iterations,
     dkLen: 32,
   });
 

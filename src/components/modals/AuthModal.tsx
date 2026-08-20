@@ -124,8 +124,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setLoginError(null);
 
-    const trimmedUser = loginUsername.trim();
-    if (!trimmedUser) {
+    const cleanUser = loginUsername.replace(/^@/, '').trim();
+    if (!cleanUser) {
       setLoginError('Zadejte prosím vaše uživatelské jméno / přezdívku.');
       return;
     }
@@ -138,9 +138,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setIsLoggingIn(true);
 
     try {
-      const success = await unlockVault(loginPassword, trimmedUser, rememberLogin);
+      const success = await unlockVault(loginPassword, cleanUser, rememberLogin);
       if (!success) {
-        setLoginError('Nesprávné heslo nebo zadané uživatelské jméno neexistuje.');
+        const isKnown = savedAccounts?.some((a) => a.username.toLowerCase() === cleanUser.toLowerCase());
+        if (isKnown) {
+          setLoginError(`Nesprávné heslo pro účet @${cleanUser}. Zkontrolujte prosím heslo a zkuste to znovu.`);
+        } else {
+          setLoginError(`Účet "@${cleanUser}" nebyl v tomto zařízení nalezen. Zvolte prosím účet z paměti níže nebo se zaregistrujte.`);
+        }
         setIsLoggingIn(false);
         return;
       }
@@ -166,8 +171,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setRegError(null);
 
-    const trimmedNick = regUsername.trim();
-    if (!trimmedNick) {
+    const cleanNick = regUsername.replace(/^@/, '').trim();
+    if (!cleanNick) {
       setRegError('Zadejte prosím požadovanou přezdívku.');
       return;
     }
@@ -180,14 +185,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setIsRegistering(true);
 
     try {
-      const check = await checkNicknameAvailable(trimmedNick);
+      const check = await checkNicknameAvailable(cleanNick);
       if (!check.available) {
-        setRegError(check.reason || `Přezdívka "${trimmedNick}" je již obsazená!`);
+        setRegError(check.reason || `Přezdívka "${cleanNick}" je již obsazená!`);
         setIsRegistering(false);
         return;
       }
 
-      await createIdentity(regPassword, trimmedNick, regRemember);
+      await createIdentity(regPassword, cleanNick, regRemember);
       setRegPassword('');
       setRegUsername('');
       setRegError(null);
