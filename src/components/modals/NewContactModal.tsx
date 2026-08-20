@@ -74,7 +74,7 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
     let targetAddress = parsed.address;
     let targetName = parsed.username || nicknameInput.trim() || undefined;
 
-    // 2. If short tag was given (e.g. #8D7-2AB)
+    // 2. If short tag was given (e.g. #8D7-2AB or 8D72AB)
     if (!targetAddress && parsed.shortTag) {
       const match = discoveredPeers.find((p) => {
         const tag = p.address.replace('k256:0x', '').slice(0, 6).toLowerCase();
@@ -84,8 +84,12 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
         targetAddress = match.address;
         targetName = match.username;
       } else {
-        setError(`Uživatel s kódem #${parsed.shortTag.toUpperCase()} nebyl v síti nalezen.`);
-        return;
+        // Create direct chat with short tag target and connect over P2P mesh
+        const tagUpper = parsed.shortTag.toUpperCase();
+        const p1 = tagUpper.slice(0, 3);
+        const p2 = tagUpper.slice(3, 6);
+        targetAddress = `k256:0x${parsed.shortTag.toLowerCase()}`;
+        targetName = nicknameInput.trim() || `Uživatel #${p1}-${p2}`;
       }
     }
 
@@ -98,8 +102,8 @@ export const NewContactModal: React.FC<NewContactModalProps> = ({
         targetAddress = match.address;
         targetName = match.username;
       } else {
-        setError(`Uživatel s přezdívkou "${parsed.username}" není online v síti.`);
-        return;
+        targetAddress = `k256:0x${parsed.username.toLowerCase()}`;
+        targetName = parsed.username;
       }
     }
 

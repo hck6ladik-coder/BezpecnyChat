@@ -138,14 +138,21 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (data.type === 'direct_message') {
-      if (data.recipientAddress?.toLowerCase() === profile.address.toLowerCase()) {
-        const convId = `conv_${data.senderAddress}`;
+      const myClean = profile.address.replace('k256:0x', '').toLowerCase();
+      const recClean = data.recipientAddress?.replace('k256:0x', '').toLowerCase() || '';
+      const isForMe =
+        recClean === myClean ||
+        myClean.startsWith(recClean) ||
+        (recClean.length >= 6 && myClean.startsWith(recClean.slice(0, 6))) ||
+        (myClean.length >= 6 && recClean.startsWith(myClean.slice(0, 6)));
+
+      if (isForMe) {
         const crisisCheck = detectCrisisIntent(data.content || '');
         const sentiment = data.sentiment || analyzeLocalSentiment(data.content || '');
 
         const incomingMsg: ChatMessage = {
           id: data.id || crypto.randomUUID(),
-          conversationId: convId,
+          conversationId: `conv_${data.senderAddress}`,
           senderAddress: data.senderAddress,
           senderName: data.senderName,
           recipientAddress: profile.address,
@@ -179,16 +186,32 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         // Ensure conversation exists or update existing
         setConversations((prev) => {
-          const existing = prev.find((c) => c.peerAddress?.toLowerCase() === data.senderAddress.toLowerCase());
+          const sClean = data.senderAddress?.replace('k256:0x', '').toLowerCase() || '';
+          const existing = prev.find((c) => {
+            const cClean = c.peerAddress?.replace('k256:0x', '').toLowerCase() || '';
+            return (
+              cClean === sClean ||
+              (cClean.length >= 6 && sClean.startsWith(cClean.slice(0, 6))) ||
+              (sClean.length >= 6 && cClean.startsWith(sClean.slice(0, 6)))
+            );
+          });
+
           if (existing) {
             return prev.map((c) =>
               c.id === existing.id
-                ? { ...c, lastMessage: incomingMsg, unreadCount: c.id === activeConversationId ? 0 : c.unreadCount + 1 }
+                ? {
+                    ...c,
+                    peerAddress: data.senderAddress,
+                    name: getDisplayName(data.senderName || c.name, data.senderAddress),
+                    lastMessage: incomingMsg,
+                    unreadCount: c.id === activeConversationId ? 0 : c.unreadCount + 1,
+                  }
                 : c
             );
           }
+
           const newConv: ChatConversation = {
-            id: convId,
+            id: `conv_${data.senderAddress}`,
             name: getDisplayName(data.senderName, data.senderAddress),
             type: 'direct',
             peerAddress: data.senderAddress,

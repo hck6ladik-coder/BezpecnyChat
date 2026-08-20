@@ -1,28 +1,24 @@
 /**
- * Decentralized Zero-Registration P2P Multi-Relay Network
+ * Decentralized Zero-Registration P2P WebRTC Mesh Network
  *
- * Connects browsers worldwide without requiring any account, cloud registration, or private servers.
- * Uses a resilient mesh of public open relays + local fallback + BroadcastChannel.
+ * Uses PeerJS (0.peerjs.com + Google STUN) for direct browser-to-browser P2P DataChannels
+ * across the global internet with ZERO registration, ZERO accounts, and ZERO cloud config.
+ * Supports fallback to BroadcastChannel (local tabs) and local WebSocket relay.
  */
+import { Peer, DataConnection } from 'peerjs';
 
 export type PacketHandler = (packet: any) => void;
 
-// Public open relays that allow free anonymous E2EE packet bridging (Zero-Registration)
-const PUBLIC_OPEN_RELAYS = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-];
-
 export class P2PMeshNetwork {
-  private localWs: WebSocket | null = null;
-  private openSockets: WebSocket[] = [];
+  private peer: Peer | null = null;
+  private connections: Map<string, DataConnection> = new Map();
   private broadcastChannel: BroadcastChannel | null = null;
+  private localWs: WebSocket | null = null;
   private onPacketCallback: PacketHandler | null = null;
   private myAddress: string = '';
   private myShortTag: string = '';
   private isDestroyed: boolean = false;
-  private reconnectTimers: any[] = [];
+  private reconnectTimer: any = null;
 
   constructor(myAddress: string, myShortTag: string, onPacket: PacketHandler) {
     this.myAddress = myAddress.toLowerCase();
@@ -31,13 +27,22 @@ export class P2PMeshNetwork {
 
     this.initBroadcastChannel();
     this.initLocalRelay();
-    this.initPublicRelays();
+    this.initPeerJS();
+  }
+
+  private cleanId(str: string): string {
+    return str.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+  }
+
+  private getPrimaryPeerId(): string {
+    const cleanAddr = this.myAddress.replace('k256:0x', '').slice(0, 16);
+    return `k256_${this.cleanId(cleanAddr)}`;
   }
 
   private initBroadcastChannel() {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v1');
+        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v2');
         this.broadcastChannel.onmessage = (e) => {
           if (this.onPacketCallback && e.data) {
             this.onPacketCallback(e.data);
@@ -60,7 +65,6 @@ export class P2PMeshNetwork {
         this.localWs = ws;
 
         ws.onopen = () => {
-          // Announce presence
           this.broadcast({
             type: 'peer_presence',
             address: this.myAddress,
@@ -76,8 +80,9 @@ export class P2PMeshNetwork {
 
         ws.onclose = () => {
           this.localWs = null;
-          const timer = setTimeout(connect, 4000);
-          this.reconnectTimers.push(timer);
+          if (!this.isDestroyed) {
+            setTimeout(connect, 4000);
+          }
         };
 
         ws.onerror = () => {
@@ -89,123 +94,156 @@ export class P2PMeshNetwork {
     connect();
   }
 
-  private initPublicRelays() {
-    PUBLIC_OPEN_RELAYS.forEach((relayUrl) => {
-      this.connectOpenRelay(relayUrl);
-    });
-  }
-
-  private connectOpenRelay(relayUrl: string) {
+  private initPeerJS() {
     if (this.isDestroyed) return;
 
     try {
-      const ws = new WebSocket(relayUrl);
+      const peerId = this.getPrimaryPeerId();
+      const p = new Peer(peerId, {
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+          ],
+        },
+      });
 
-      ws.onopen = () => {
-        this.openSockets.push(ws);
+      this.peer = p;
 
-        // Subscribe via open nostr protocol filter for our address and short tag
-        const subId = `sub_${Math.random().toString(36).slice(2, 9)}`;
-        const filter = {
-          kinds: [20000], // Ephemeral encrypted range
-          '#t': [this.myAddress, this.myShortTag, 'keccak_discovery'],
-          limit: 20,
-        };
-        const req = JSON.stringify(['REQ', subId, filter]);
-        ws.send(req);
-      };
+      p.on('open', (id) => {
+        console.log('[P2P Mesh] Connected with Peer ID:', id);
+        // Announce presence
+        this.broadcast({
+          type: 'peer_presence',
+          address: this.myAddress,
+        });
+      });
 
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          // Nostr event format: ["EVENT", "sub_id", { content: "...", ... }]
-          if (Array.isArray(msg) && msg[0] === 'EVENT' && msg[2]?.content) {
-            const parsed = JSON.parse(msg[2].content);
-            if (this.onPacketCallback) this.onPacketCallback(parsed);
-          } else if (msg && msg.type && this.onPacketCallback) {
-            this.onPacketCallback(msg);
-          }
-        } catch {}
-      };
+      p.on('connection', (conn) => {
+        this.setupConnection(conn);
+      });
 
-      ws.onclose = () => {
-        this.openSockets = this.openSockets.filter((s) => s !== ws);
-        const timer = setTimeout(() => this.connectOpenRelay(relayUrl), 8000);
-        this.reconnectTimers.push(timer);
-      };
+      p.on('error', (err: any) => {
+        console.warn('[P2P Mesh] Peer error:', err?.type || err);
+        // If ID taken or server error, retry gracefully
+        if (err?.type === 'unavailable-id') {
+          // ID already in use in another tab or instance
+          return;
+        }
+      });
 
-      ws.onerror = () => {
-        try { ws.close(); } catch {}
-      };
-    } catch {}
+      p.on('disconnected', () => {
+        if (!this.isDestroyed && !p.destroyed) {
+          p.reconnect();
+        }
+      });
+    } catch (err) {
+      console.warn('[P2P Mesh] PeerJS init error:', err);
+    }
+  }
+
+  private setupConnection(conn: DataConnection) {
+    conn.on('open', () => {
+      this.connections.set(conn.peer, conn);
+      console.log('[P2P Mesh] Direct P2P DataChannel open with:', conn.peer);
+    });
+
+    conn.on('data', (data: any) => {
+      try {
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        if (this.onPacketCallback && parsed) {
+          this.onPacketCallback(parsed);
+        }
+      } catch {}
+    });
+
+    conn.on('close', () => {
+      this.connections.delete(conn.peer);
+    });
+
+    conn.on('error', () => {
+      this.connections.delete(conn.peer);
+    });
+  }
+
+  private connectToPeer(targetAddressOrTag: string): DataConnection | null {
+    if (!this.peer || this.peer.destroyed) return null;
+
+    const clean = targetAddressOrTag.replace('k256:0x', '').replace('#', '').replace('-', '').slice(0, 16);
+    const targetPeerId = `k256_${this.cleanId(clean)}`;
+
+    if (this.connections.has(targetPeerId)) {
+      const existing = this.connections.get(targetPeerId);
+      if (existing?.open) return existing;
+    }
+
+    try {
+      const conn = this.peer.connect(targetPeerId, { reliable: true });
+      this.setupConnection(conn);
+      return conn;
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * Broadcast packet across all channels (Localhost, Public Decentralized Relays, BroadcastChannel)
+   * Broadcast or send packet directly to peer across all available transports
    */
   public broadcast(packet: any) {
-    const raw = JSON.stringify(packet);
+    const raw = typeof packet === 'string' ? packet : JSON.stringify(packet);
 
-    // 1. BroadcastChannel (same browser / tabs)
+    // 1. BroadcastChannel (same browser tabs)
     if (this.broadcastChannel) {
       try {
         this.broadcastChannel.postMessage(packet);
       } catch {}
     }
 
-    // 2. Localhost WebSocket (if running)
+    // 2. Localhost WebSocket (if running locally)
     if (this.localWs && this.localWs.readyState === WebSocket.OPEN) {
       try {
         this.localWs.send(raw);
       } catch {}
     }
 
-    // 3. Open Public Relays (across the global internet without accounts)
-    const targetTag = packet.targetHashedAddress
-      ? packet.targetHashedAddress.replace('k256:0x', '').slice(0, 6).toLowerCase()
-      : packet.recipientAddress
-      ? packet.recipientAddress.replace('k256:0x', '').slice(0, 6).toLowerCase()
-      : 'keccak_discovery';
-
-    const targetAddr = packet.targetHashedAddress || packet.recipientAddress || 'keccak_discovery';
-
-    const nostrEvent = [
-      'EVENT',
-      {
-        kind: 20000,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['t', targetAddr.toLowerCase()],
-          ['t', targetTag.toLowerCase()],
-          ['t', 'keccak_discovery'],
-        ],
-        content: raw,
-      },
-    ];
-
-    const nostrRaw = JSON.stringify(nostrEvent);
-
-    for (const ws of this.openSockets) {
-      if (ws.readyState === WebSocket.OPEN) {
+    // 3. Direct P2P WebRTC DataChannel (across any 2 computers on the internet)
+    const target = packet.recipientAddress || packet.targetHashedAddress;
+    if (target && target.toLowerCase() !== this.myAddress) {
+      const conn = this.connectToPeer(target);
+      if (conn && conn.open) {
         try {
-          ws.send(nostrRaw);
+          conn.send(packet);
         } catch {}
       }
     }
+
+    // Also send to all established active direct connections
+    this.connections.forEach((conn) => {
+      if (conn.open) {
+        try {
+          conn.send(packet);
+        } catch {}
+      }
+    });
   }
 
   public destroy() {
     this.isDestroyed = true;
-    this.reconnectTimers.forEach(clearTimeout);
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.broadcastChannel) {
       try { this.broadcastChannel.close(); } catch {}
     }
     if (this.localWs) {
       try { this.localWs.close(); } catch {}
     }
-    this.openSockets.forEach((s) => {
-      try { s.close(); } catch {}
+    this.connections.forEach((c) => {
+      try { c.close(); } catch {}
     });
-    this.openSockets = [];
+    this.connections.clear();
+    if (this.peer && !this.peer.destroyed) {
+      try { this.peer.destroy(); } catch {}
+    }
+    this.peer = null;
   }
 }
