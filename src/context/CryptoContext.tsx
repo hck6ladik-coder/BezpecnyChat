@@ -51,6 +51,8 @@ interface CryptoContextType {
   createIdentity: (password: string, username: string, rememberLogin?: boolean) => Promise<UserProfile>;
   unlockVault: (password: string, username?: string, rememberLogin?: boolean) => Promise<boolean>;
   lockVault: () => void;
+  resetAccount: (username: string) => Promise<void>;
+  resetAllLocalData: () => Promise<void>;
   rotateKeys: () => Promise<void>;
   enable2FA: (secretHex: string, backupHashes: string[]) => Promise<void>;
   disable2FA: () => Promise<void>;
@@ -156,7 +158,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (accounts[clean.toLowerCase()]) {
         return {
           available: false,
-          reason: `Přezdívka "${clean}" je již obsazená. Zvolte prosím jinou.`,
+          reason: `Přezdívka "${clean}" je již na tomto zařízení obsazená. Zvolte prosím jinou nebo tento účet resetujte.`,
         };
       }
       const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
@@ -167,12 +169,82 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (isTaken) {
         return {
           available: false,
-          reason: `Přezdívka "${clean}" je již obsazená. Zvolte prosím jinou.`,
+          reason: `Přezdívka "${clean}" je již na tomto zařízení obsazená. Zvolte prosím jinou nebo tento účet resetujte.`,
         };
       }
     } catch {}
 
     return { available: true };
+  };
+
+  const resetAccount = async (rawUsername: string) => {
+    const clean = rawUsername.replace(/^@/, '').trim();
+    if (!clean) return;
+    const userKey = clean.toLowerCase();
+
+    // 1. Remove from stored accounts registry
+    const accounts = getStoredAccounts();
+    delete accounts[userKey];
+    saveStoredAccounts(accounts);
+
+    // 2. Remove from registered list
+    try {
+      const storedJson = localStorage.getItem(STORAGE_KEY_USERNAMES);
+      let registeredList: string[] = storedJson ? JSON.parse(storedJson) : [];
+      registeredList = registeredList.filter((n) => n.toLowerCase() !== userKey);
+      localStorage.setItem(STORAGE_KEY_USERNAMES, JSON.stringify(registeredList));
+    } catch {}
+
+    // 3. Remove from localStorage backups
+    localStorage.removeItem('keccak_vault_profile_' + userKey);
+    localStorage.removeItem('keccak_vault_prekeys_' + userKey);
+
+    // 4. Remove from IndexedDB
+    try {
+      await secureStorage.deleteItem(STORAGE_KEY_PROFILE + '_' + userKey);
+      await secureStorage.deleteItem(STORAGE_KEY_PREKEYS + '_' + userKey);
+    } catch {}
+
+    // 5. Update state
+    if (savedUsername.toLowerCase() === userKey || profile?.username.toLowerCase() === userKey) {
+      lockVault();
+      setSavedUsername('');
+      localStorage.removeItem(STORAGE_KEY_LAST_USER);
+    }
+
+    if (Object.keys(accounts).length === 0) {
+      setIsInitialized(false);
+    }
+
+    addAuditLog({
+      type: 'blocked_leak',
+      title: `Účet @${clean} byl resetován`,
+      description: 'Místní kryptografický trezor tohoto účtu byl bezpečně odstraněn.',
+      details: { username: clean },
+      severity: 'warning',
+    });
+  };
+
+  const resetAllLocalData = async () => {
+    lockVault();
+    try {
+      await secureStorage.clearAll();
+    } catch {}
+    localStorage.removeItem(STORAGE_KEY_ACCOUNTS);
+    localStorage.removeItem(STORAGE_KEY_USERNAMES);
+    localStorage.removeItem(STORAGE_KEY_SALT);
+    localStorage.removeItem(STORAGE_KEY_LAST_USER);
+    localStorage.removeItem(STORAGE_KEY_REMEMBER);
+    setSavedUsername('');
+    setIsInitialized(false);
+
+    addAuditLog({
+      type: 'blocked_leak',
+      title: 'Vymazána veškerá lokální data aplikace',
+      description: 'Zařízení bylo vráceno do výchozího stavu.',
+      details: {},
+      severity: 'warning',
+    });
   };
 
   const createIdentity = async (
@@ -186,7 +258,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       throw new Error(check.reason || 'Tato přezdívka je již obsazená.');
     }
 
-    const { masterKey, saltHex } = await deriveMasterKey(password);
+    const { masterKey, saltHex } = await deriveMasterKey(password, undefined, 20_000);
     const { vaultKey } = deriveSubkeys(masterKey);
     const authVerifier = keccak256Hex(password + ':' + saltHex);
 
@@ -300,7 +372,7 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       let saltHex: string | null = null;
       let accountRecord: UserAccountRecord | null = null;
 
-      // Find user account in registry
+      // 1. Find user account in registry
       if (userKey && accounts[userKey]) {
         accountRecord = accounts[userKey];
         saltHex = accountRecord.saltHex;
@@ -331,103 +403,112 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         return false;
       }
 
-      // Derive master key and vault encryption key
-      const { masterKey } = await deriveMasterKey(password, saltHex);
-      const { vaultKey } = deriveSubkeys(masterKey);
-      secureStorage.unlock(masterKey);
+      // Decryption helper across all storage layers
+      const tryDecryptAll = async (
+        vKey: Uint8Array
+      ): Promise<{
+        profile: UserProfile;
+        prekeysRaw: {
+          identityKeyPair: StoredPrekeys['identityKeyPair'];
+          signingKeyPair: StoredPrekeys['signingKeyPair'];
+          signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
+          oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
+        };
+      } | null> => {
+        let prof: UserProfile | null = null;
+        let pre: any = null;
 
-      // --- Multi-layer Profile Decryption ---
-      let loadedProfile: UserProfile | null = null;
+        // Profile: Layer 1 (IDB per-user)
+        if (userKey) {
+          try {
+            prof = await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE + '_' + userKey);
+          } catch {}
+        }
+        // Profile: Layer 2 (IDB default)
+        if (!prof) {
+          try {
+            prof = await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE);
+          } catch {}
+        }
+        // Profile: Layer 3 (localStorage accountRecord)
+        if (!prof && accountRecord?.encryptedProfile) {
+          try {
+            prof = await decryptJson<UserProfile>(accountRecord.encryptedProfile, vKey);
+          } catch {}
+        }
+        // Profile: Layer 4 (localStorage key)
+        if (!prof && userKey) {
+          try {
+            const raw = localStorage.getItem('keccak_vault_profile_' + userKey);
+            if (raw) prof = await decryptJson<UserProfile>(JSON.parse(raw), vKey);
+          } catch {}
+        }
 
-      // Layer 1: IndexedDB user-specific key
-      if (userKey) {
+        // Prekeys: Layer 1 (IDB per-user)
+        if (userKey) {
+          try {
+            pre = await secureStorage.getEncryptedItem(STORAGE_KEY_PREKEYS + '_' + userKey);
+          } catch {}
+        }
+        // Prekeys: Layer 2 (IDB default)
+        if (!pre) {
+          try {
+            pre = await secureStorage.getEncryptedItem(STORAGE_KEY_PREKEYS);
+          } catch {}
+        }
+        // Prekeys: Layer 3 (localStorage accountRecord)
+        if (!pre && accountRecord?.encryptedPrekeys) {
+          try {
+            pre = await decryptJson(accountRecord.encryptedPrekeys, vKey);
+          } catch {}
+        }
+        // Prekeys: Layer 4 (localStorage key)
+        if (!pre && userKey) {
+          try {
+            const raw = localStorage.getItem('keccak_vault_prekeys_' + userKey);
+            if (raw) pre = await decryptJson(JSON.parse(raw), vKey);
+          } catch {}
+        }
+
+        if (prof && pre) {
+          return { profile: prof, prekeysRaw: pre };
+        }
+        return null;
+      };
+
+      // Attempt 1: Fast PBKDF2 (20,000 iterations)
+      let derivation = await deriveMasterKey(password, saltHex, 20_000);
+      let subkeys = deriveSubkeys(derivation.masterKey);
+      secureStorage.unlock(derivation.masterKey);
+      let decrypted = await tryDecryptAll(subkeys.vaultKey);
+
+      // Attempt 2: Legacy PBKDF2 (210,000 iterations for accounts created in older version)
+      if (!decrypted) {
         try {
-          loadedProfile = await secureStorage.getEncryptedItem<UserProfile>(
-            STORAGE_KEY_PROFILE + '_' + userKey
-          );
+          derivation = await deriveMasterKey(password, saltHex, 210_000);
+          subkeys = deriveSubkeys(derivation.masterKey);
+          secureStorage.unlock(derivation.masterKey);
+          decrypted = await tryDecryptAll(subkeys.vaultKey);
         } catch {}
       }
 
-      // Layer 2: IndexedDB global key
-      if (!loadedProfile) {
+      // Attempt 3: Legacy PBKDF2 (100,000 iterations)
+      if (!decrypted) {
         try {
-          loadedProfile = await secureStorage.getEncryptedItem<UserProfile>(STORAGE_KEY_PROFILE);
+          derivation = await deriveMasterKey(password, saltHex, 100_000);
+          subkeys = deriveSubkeys(derivation.masterKey);
+          secureStorage.unlock(derivation.masterKey);
+          decrypted = await tryDecryptAll(subkeys.vaultKey);
         } catch {}
       }
 
-      // Layer 3: accountRecord encryptedProfile from localStorage
-      if (!loadedProfile && accountRecord?.encryptedProfile) {
-        try {
-          loadedProfile = await decryptJson<UserProfile>(accountRecord.encryptedProfile, vaultKey);
-        } catch {}
-      }
-
-      // Layer 4: localStorage standalone encrypted backup
-      if (!loadedProfile && userKey) {
-        try {
-          const rawBackup = localStorage.getItem('keccak_vault_profile_' + userKey);
-          if (rawBackup) {
-            const parsed = JSON.parse(rawBackup) as EncryptedPayload;
-            loadedProfile = await decryptJson<UserProfile>(parsed, vaultKey);
-          }
-        } catch {}
-      }
-
-      // --- Multi-layer Prekeys Decryption ---
-      let loadedPrekeysRaw: {
-        identityKeyPair: StoredPrekeys['identityKeyPair'];
-        signingKeyPair: StoredPrekeys['signingKeyPair'];
-        signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
-        oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
-      } | null = null;
-
-      // Layer 1: IndexedDB user-specific key
-      if (userKey) {
-        try {
-          loadedPrekeysRaw = await secureStorage.getEncryptedItem<{
-            identityKeyPair: StoredPrekeys['identityKeyPair'];
-            signingKeyPair: StoredPrekeys['signingKeyPair'];
-            signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
-            oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
-          }>(STORAGE_KEY_PREKEYS + '_' + userKey);
-        } catch {}
-      }
-
-      // Layer 2: IndexedDB global key
-      if (!loadedPrekeysRaw) {
-        try {
-          loadedPrekeysRaw = await secureStorage.getEncryptedItem<{
-            identityKeyPair: StoredPrekeys['identityKeyPair'];
-            signingKeyPair: StoredPrekeys['signingKeyPair'];
-            signedPrekeyPair: StoredPrekeys['signedPrekeyPair'];
-            oneTimePrekeyPairs: [string, StoredPrekeys['identityKeyPair']][];
-          }>(STORAGE_KEY_PREKEYS);
-        } catch {}
-      }
-
-      // Layer 3: accountRecord encryptedPrekeys from localStorage
-      if (!loadedPrekeysRaw && accountRecord?.encryptedPrekeys) {
-        try {
-          loadedPrekeysRaw = await decryptJson(accountRecord.encryptedPrekeys, vaultKey);
-        } catch {}
-      }
-
-      // Layer 4: localStorage standalone encrypted backup
-      if (!loadedPrekeysRaw && userKey) {
-        try {
-          const rawBackup = localStorage.getItem('keccak_vault_prekeys_' + userKey);
-          if (rawBackup) {
-            const parsed = JSON.parse(rawBackup) as EncryptedPayload;
-            loadedPrekeysRaw = await decryptJson(parsed, vaultKey);
-          }
-        } catch {}
-      }
-
-      // If decryption failed or no records exist (AES-GCM tag mismatch on wrong password)
-      if (!loadedProfile || !loadedPrekeysRaw) {
+      // If all attempts failed (wrong password or unreadable vault)
+      if (!decrypted) {
         secureStorage.lock();
         return false;
       }
+
+      const { profile: loadedProfile, prekeysRaw: loadedPrekeysRaw } = decrypted;
 
       // Reconstruct cryptographic prekeys bundle
       const reconstructedPrekeys: StoredPrekeys = {
@@ -441,9 +522,13 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const finalUsername = loadedProfile.username || cleanUser || accountRecord?.username || 'Uživatel';
       const finalKey = finalUsername.toLowerCase();
 
-      // Synchronize & Heal account records in both storages
-      const encProfileFresh = await encryptJson(loadedProfile, vaultKey);
-      const encPrekeysFresh = await encryptJson(loadedPrekeysRaw, vaultKey);
+      // Migrate to fresh 20,000 iterations vault key for instant future unlocks
+      const freshDerivation = await deriveMasterKey(password, saltHex, 20_000);
+      const freshSubkeys = deriveSubkeys(freshDerivation.masterKey);
+      secureStorage.unlock(freshDerivation.masterKey);
+
+      const encProfileFresh = await encryptJson(loadedProfile, freshSubkeys.vaultKey);
+      const encPrekeysFresh = await encryptJson(loadedPrekeysRaw, freshSubkeys.vaultKey);
 
       accounts[finalKey] = {
         username: finalUsername,
@@ -713,6 +798,8 @@ export const CryptoProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         createIdentity,
         unlockVault,
         lockVault,
+        resetAccount,
+        resetAllLocalData,
         rotateKeys,
         enable2FA,
         disable2FA,

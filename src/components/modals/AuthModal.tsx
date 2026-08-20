@@ -30,6 +30,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     isUnlocked,
     createIdentity,
     unlockVault,
+    resetAccount,
+    resetAllLocalData,
     profile,
     verify2FA,
     savedUsername,
@@ -391,7 +393,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   />
                 </div>
 
-                {/* Remember Me Checkbox */}
+                {/* Remember Me Checkbox & Reset Account */}
                 <div className="flex items-center justify-between pt-0.5">
                   <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
                     <input
@@ -404,6 +406,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                       Uložit přihlášení (Pamatovat si mě)
                     </span>
                   </label>
+
+                  {loginUsername && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const clean = loginUsername.replace(/^@/, '').trim();
+                        if (window.confirm(`Opravdu chcete na tomto zařízení resetovat účet @${clean}? Můžete si pro toto jméno ihned nastavit nové heslo.`)) {
+                          await resetAccount(clean);
+                          setRegUsername(clean);
+                          setLoginPassword('');
+                          setLoginError(null);
+                        }
+                      }}
+                      className="text-[10px] text-cyber-400 hover:text-cyber-300 underline transition-colors"
+                    >
+                      Resetovat účet / Nové heslo
+                    </button>
+                  )}
                 </div>
 
                 <button
@@ -561,6 +581,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               >
                 <Sparkles className="w-3.5 h-3.5 text-cyber-400" />
                 <span>Bleskový anonymní účet (Jednorázový přístup)</span>
+              </button>
+            </div>
+
+            {/* Clear All Local Data Link */}
+            <div className="pt-1 flex justify-center">
+              <button
+                type="button"
+                onClick={async () => {
+                  if (window.confirm('Opravdu chcete vymazat veškerá lokální data aplikace na tomto zařízení a začít od začátku?')) {
+                    await resetAllLocalData();
+                    setLoginUsername('');
+                    setLoginPassword('');
+                    setRegUsername('');
+                    setRegPassword('');
+                    setLoginError(null);
+                    setRegError(null);
+                  }
+                }}
+                className="text-[10px] text-slate-500 hover:text-red-400 underline transition-colors"
+              >
+                Vymazat paměť zařízení (Začít úplně znovu)
               </button>
             </div>
           </div>
