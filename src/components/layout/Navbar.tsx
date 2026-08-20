@@ -134,8 +134,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 alt={profile.username}
                 className="w-6 h-6 rounded-full bg-slate-700 border border-cyber-500/40"
               />
-              <span className="font-medium text-slate-200 hidden sm:inline max-w-[120px] truncate">
-                {profile.username}
+              <span className="font-semibold text-slate-200 hidden sm:inline max-w-[120px] truncate">
+                {profile.username || 'Uživatel'}
+              </span>
+              <span className="text-[10px] font-mono text-cyber-300 bg-cyber-500/10 px-1.5 py-0.5 rounded-md border border-cyber-500/30">
+                {formatKeccakAddress(profile.address)}
               </span>
             </button>
 

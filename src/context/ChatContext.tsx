@@ -9,11 +9,12 @@ import { useCrypto } from './CryptoContext';
 import { ratchetEncrypt, ratchetDecrypt } from '../crypto/ratchet';
 import { groupEncrypt, groupDecrypt } from '../crypto/senderKey';
 import { encryptFileBlob, decryptFileBlob } from '../crypto/aes';
-import { computeKeccakTag, deriveKeccakAddress, formatKeccakAddress } from '../crypto/keccak';
+import { computeKeccakTag, deriveKeccakAddress, formatKeccakAddress, getDisplayName, deriveShortChatTag } from '../crypto/keccak';
 import { generateUserPrekeys, createPublicPrekeyBundle, UserPrekeyBundle } from '../crypto/x3dh';
 import { computeSafetyNumber } from '../crypto/safetyNumbers';
 import { analyzeSentimentDistilBert, analyzeLocalSentiment } from '../services/sentimentService';
 import { detectCrisisIntent } from '../services/safetyGuard';
+import { P2PMeshNetwork } from '../services/p2pMesh';
 
 export interface DiscoveredPeer {
   address: string;
@@ -81,8 +82,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [offlineQueue, setOfflineQueue] = useState<ChatMessage[]>([]);
   const [discoveredPeers, setDiscoveredPeers] = useState<DiscoveredPeer[]>([]);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const bcRef = useRef<BroadcastChannel | null>(null);
+  const p2pMeshRef = useRef<P2PMeshNetwork | null>(null);
 
   // Monitor network state
   useEffect(() => {
@@ -96,7 +96,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  // Handle incoming network packets from either WebSocket or BroadcastChannel
+  // Handle incoming network packets from P2P mesh network
   const handleIncomingPacket = (data: any) => {
     if (!data || !profile) return;
 
@@ -126,20 +126,14 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (data.type === 'peer_query') {
-      if (profile && publicBundle) {
-        const presenceMsg = {
+      if (profile && publicBundle && p2pMeshRef.current) {
+        p2pMeshRef.current.broadcast({
           type: 'peer_presence',
           address: profile.address,
           username: profile.username,
           avatar: profile.avatar,
           bundle: publicBundle,
-        };
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify(presenceMsg));
-        }
-        if (bcRef.current) {
-          bcRef.current.postMessage(presenceMsg);
-        }
+        });
       }
     }
 
@@ -195,7 +189,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
           const newConv: ChatConversation = {
             id: convId,
-            name: data.senderName || formatKeccakAddress(data.senderAddress),
+            name: getDisplayName(data.senderName, data.senderAddress),
             type: 'direct',
             peerAddress: data.senderAddress,
             peerIdentityKeyHex: data.bundle?.identityKeyHex,
@@ -211,7 +205,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         addAuditLog({
           type: 'integrity_check',
-          title: `Příjem E2EE zprávy od ${data.senderName || formatKeccakAddress(data.senderAddress)}`,
+          title: `Příjem E2EE zprávy od ${getDisplayName(data.senderName, data.senderAddress)}`,
           description: `Integrita KECCAK256: 0x${data.keccakIntegrityTag ? data.keccakIntegrityTag.slice(0, 8) : 'ok'}...`,
           details: { sender: data.senderAddress, tag: data.keccakIntegrityTag },
           severity: 'success',
@@ -220,89 +214,36 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Setup WebSocket relay client & BroadcastChannel
+  // Setup Decentralized Zero-Registration P2P Network Mesh
   useEffect(() => {
     if (!profile) return;
 
-    // BroadcastChannel for cross-tab (same origin)
-    if (typeof BroadcastChannel !== 'undefined') {
-      const bc = new BroadcastChannel('keccak_e2ee_network');
-      bcRef.current = bc;
-      bc.onmessage = (event) => handleIncomingPacket(event.data);
-    }
+    const mesh = new P2PMeshNetwork(
+      profile.address,
+      formatKeccakAddress(profile.address),
+      handleIncomingPacket
+    );
+    p2pMeshRef.current = mesh;
 
-    // WebSocket for cross-window / incognito / cross-device relay
-    const host = window.location.hostname || 'localhost';
-    const wsUrl = `ws://${host}:8080`;
-    let ws: WebSocket | null = null;
-    let reconnectTimeout: any = null;
-
-    const connectWs = () => {
-      try {
-        ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          if (profile && publicBundle) {
-            const presenceMsg = {
-              type: 'peer_presence',
-              address: profile.address,
-              username: profile.username,
-              avatar: profile.avatar,
-              bundle: publicBundle,
-            };
-            ws?.send(JSON.stringify(presenceMsg));
-            ws?.send(JSON.stringify({ type: 'peer_query' }));
-          }
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            handleIncomingPacket(data);
-          } catch {}
-        };
-
-        ws.onclose = () => {
-          reconnectTimeout = setTimeout(connectWs, 3000);
-        };
-
-        ws.onerror = () => {
-          ws?.close();
-        };
-      } catch {
-        reconnectTimeout = setTimeout(connectWs, 3000);
-      }
-    };
-
-    connectWs();
-
-    // Heartbeat / Presence announcement interval
+    // Heartbeat / Presence announcement interval across the P2P mesh
     const presenceInterval = setInterval(() => {
-      if (profile && publicBundle) {
-        const presenceMsg = {
+      if (profile && publicBundle && p2pMeshRef.current) {
+        p2pMeshRef.current.broadcast({
           type: 'peer_presence',
           address: profile.address,
           username: profile.username,
           avatar: profile.avatar,
           bundle: publicBundle,
-        };
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify(presenceMsg));
-        }
-        if (bcRef.current) {
-          bcRef.current.postMessage(presenceMsg);
-        }
+        });
       }
-    }, 3000);
+    }, 4000);
 
     return () => {
       clearInterval(presenceInterval);
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) ws.close();
-      if (bcRef.current) bcRef.current.close();
+      mesh.destroy();
+      p2pMeshRef.current = null;
     };
-  }, [profile, publicBundle, activeConversationId]);
+  }, [profile, publicBundle]);
 
   // Periodic tick for self-destructing message deletion
   useEffect(() => {
@@ -410,7 +351,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.error('Error ratcheting:', err);
       }
 
-      // Broadcast payload to peer over WebSocket AND BroadcastChannel
+      // Broadcast payload to peer over Decentralized P2P Mesh Network
       const payload = {
         type: 'direct_message',
         id: msgId,
@@ -429,11 +370,8 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         sentiment: initialSentiment,
       };
 
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify(payload));
-      }
-      if (bcRef.current) {
-        bcRef.current.postMessage(payload);
+      if (p2pMeshRef.current) {
+        p2pMeshRef.current.broadcast(payload);
       }
     } else if (conv.type === 'group') {
       try {
@@ -494,7 +432,7 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newId = `conv_${peerAddress}`;
     const newConv: ChatConversation = {
       id: newId,
-      name: peerName || formatKeccakAddress(peerAddress),
+      name: getDisplayName(peerName, peerAddress),
       type: 'direct',
       peerAddress,
       peerIdentityKeyHex: bundle.identityKeyHex,

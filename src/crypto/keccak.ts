@@ -56,11 +56,27 @@ export function deriveKeccakAddress(publicKeyBytes: Uint8Array): string {
 /**
  * Format friendly display address
  */
-export function formatKeccakAddress(address: string): string {
-  if (!address.startsWith('k256:0x')) return address;
-  const hexPart = address.replace('k256:0x', '');
-  if (hexPart.length <= 12) return address;
-  return `k256:0x${hexPart.slice(0, 6)}...${hexPart.slice(-4)}`;
+/**
+ * Format friendly display address as a short memorable tag (e.g. #8D7-2AB)
+ */
+export function formatKeccakAddress(address?: string): string {
+  if (!address) return '';
+  const clean = address.replace('k256:0x', '').replace('0x', '').toLowerCase();
+  if (clean.length < 6) return address;
+  const p1 = clean.slice(0, 3).toUpperCase();
+  const p2 = clean.slice(3, 6).toUpperCase();
+  return `#${p1}-${p2}`;
+}
+
+/**
+ * Format friendly display name for any contact (e.g. "Honza #8D7-2AB" or "Uživatel #8D7-2AB")
+ */
+export function getDisplayName(name?: string, address?: string): string {
+  const shortTag = address ? formatKeccakAddress(address) : '';
+  if (name && !name.startsWith('k256:0x') && !name.startsWith('0x') && !name.startsWith('#')) {
+    return shortTag ? `${name} ${shortTag}` : name;
+  }
+  return `Uživatel ${shortTag}`.trim();
 }
 
 /**

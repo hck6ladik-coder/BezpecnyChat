@@ -82,9 +82,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
               className="w-12 h-12 rounded-2xl bg-slate-800 border-2 border-cyber-500/40 object-cover"
             />
             <div>
-              <h3 className="font-semibold text-base">{profile.username}</h3>
-              <p className="text-xs text-slate-400 font-mono">
-                {formatKeccakAddress(profile.address)}
+              <h3 className="font-bold text-lg text-slate-100 flex items-center space-x-2">
+                <span>{profile.username || 'Uživatel'}</span>
+                <span className="text-xs font-mono font-semibold text-cyber-300 bg-cyber-500/10 px-2 py-0.5 rounded-full border border-cyber-500/30">
+                  {formatKeccakAddress(profile.address)}
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Šifrovaný profil v P2P síti
               </p>
             </div>
           </div>
@@ -96,24 +101,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
           </button>
         </div>
 
-        {/* Keccak Address Info */}
-        <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span className="font-medium flex items-center space-x-1.5 text-cyber-300">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Vaše KECCAK256 Adresa (Identifikátor)</span>
-            </span>
+        {/* Short Code & 1-Click Invite Link Box */}
+        <div className="p-4 bg-gradient-to-br from-slate-950 to-slate-900 border border-cyber-500/30 rounded-2xl space-y-3 shadow-lg shadow-cyber-500/5">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-xs text-slate-400 font-medium">Váš jednoduchý kód pro spojení:</span>
+              <div className="text-xl font-mono font-bold text-cyber-300 tracking-wider">
+                {formatKeccakAddress(profile.address)}
+              </div>
+            </div>
             <button
-              onClick={handleCopyAddress}
-              className="flex items-center space-x-1 text-cyber-400 hover:text-cyber-300 font-mono text-[11px]"
+              onClick={() => {
+                navigator.clipboard.writeText(formatKeccakAddress(profile.address));
+                setCopiedAddr(true);
+                setTimeout(() => setCopiedAddr(false), 2000);
+              }}
+              className="px-3 py-1.5 bg-cyber-500/20 hover:bg-cyber-500/30 text-cyber-300 text-xs font-semibold rounded-xl border border-cyber-500/40 flex items-center space-x-1.5 transition-all"
             >
-              {copiedAddr ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-              <span>{copiedAddr ? 'Zkopírováno' : 'Kopírovat'}</span>
+              {copiedAddr ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedAddr ? 'Zkopírováno' : 'Kopírovat kód'}</span>
             </button>
           </div>
-          <p className="text-xs font-mono text-slate-300 break-all bg-slate-900 p-2 rounded-lg border border-slate-800/80">
-            {profile.address}
-          </p>
         </div>
 
         {/* Public Cryptographic Bundle */}
