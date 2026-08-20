@@ -12,39 +12,47 @@ export type PacketHandler = (packet: any) => void;
 export class P2PMeshNetwork {
   private peer: Peer | null = null;
   private connections: Map<string, DataConnection> = new Map();
+  private pendingPackets: Map<string, any[]> = new Map();
   private broadcastChannel: BroadcastChannel | null = null;
   private localWs: WebSocket | null = null;
   private onPacketCallback: PacketHandler | null = null;
   private myAddress: string = '';
   private myShortTag: string = '';
   private isDestroyed: boolean = false;
-  private reconnectTimer: any = null;
+  private pingInterval: any = null;
 
   constructor(myAddress: string, myShortTag: string, onPacket: PacketHandler) {
     this.myAddress = myAddress.toLowerCase();
-    this.myShortTag = myShortTag.replace('#', '').replace('-', '').toLowerCase();
+    this.myShortTag = myShortTag.replace('#', '').replace('-', '').slice(0, 6).toLowerCase();
     this.onPacketCallback = onPacket;
 
     this.initBroadcastChannel();
     this.initLocalRelay();
     this.initPeerJS();
-  }
 
-  private cleanId(str: string): string {
-    return str.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    // Keepalive ping for WebRTC connections
+    this.pingInterval = setInterval(() => {
+      this.connections.forEach((conn) => {
+        if (conn.open) {
+          try {
+            conn.send({ type: 'p2p_ping', timestamp: Date.now() });
+          } catch {}
+        }
+      });
+    }, 5000);
   }
 
   private getPrimaryPeerId(): string {
-    const cleanAddr = this.myAddress.replace('k256:0x', '').slice(0, 16);
-    return `k256_${this.cleanId(cleanAddr)}`;
+    const tag = this.myAddress.replace('k256:0x', '').slice(0, 6).toLowerCase();
+    return `k256_${tag}`;
   }
 
   private initBroadcastChannel() {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v2');
+        this.broadcastChannel = new BroadcastChannel('keccak_p2p_mesh_v3');
         this.broadcastChannel.onmessage = (e) => {
-          if (this.onPacketCallback && e.data) {
+          if (this.onPacketCallback && e.data && e.data.type !== 'p2p_ping') {
             this.onPacketCallback(e.data);
           }
         };
@@ -74,7 +82,9 @@ export class P2PMeshNetwork {
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (this.onPacketCallback) this.onPacketCallback(data);
+            if (this.onPacketCallback && data.type !== 'p2p_ping') {
+              this.onPacketCallback(data);
+            }
           } catch {}
         };
 
@@ -105,6 +115,8 @@ export class P2PMeshNetwork {
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
             { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
           ],
         },
       });
@@ -112,30 +124,32 @@ export class P2PMeshNetwork {
       this.peer = p;
 
       p.on('open', (id) => {
-        console.log('[P2P Mesh] Connected with Peer ID:', id);
-        // Announce presence
-        this.broadcast({
-          type: 'peer_presence',
-          address: this.myAddress,
-        });
+        console.log('[P2P Mesh] Connected to global peer network with ID:', id);
+        // Announce presence locally
+        if (this.broadcastChannel) {
+          try {
+            this.broadcastChannel.postMessage({
+              type: 'peer_presence',
+              address: this.myAddress,
+            });
+          } catch {}
+        }
       });
 
       p.on('connection', (conn) => {
+        console.log('[P2P Mesh] Incoming connection from:', conn.peer);
         this.setupConnection(conn);
       });
 
       p.on('error', (err: any) => {
         console.warn('[P2P Mesh] Peer error:', err?.type || err);
-        // If ID taken or server error, retry gracefully
-        if (err?.type === 'unavailable-id') {
-          // ID already in use in another tab or instance
-          return;
-        }
       });
 
       p.on('disconnected', () => {
         if (!this.isDestroyed && !p.destroyed) {
-          p.reconnect();
+          try {
+            p.reconnect();
+          } catch {}
         }
       });
     } catch (err) {
@@ -145,13 +159,36 @@ export class P2PMeshNetwork {
 
   private setupConnection(conn: DataConnection) {
     conn.on('open', () => {
+      console.log('[P2P Mesh] WebRTC DataChannel OPEN with:', conn.peer);
       this.connections.set(conn.peer, conn);
-      console.log('[P2P Mesh] Direct P2P DataChannel open with:', conn.peer);
+
+      // Send our presence immediately to establish identity
+      try {
+        conn.send({
+          type: 'peer_presence',
+          address: this.myAddress,
+        });
+      } catch {}
+
+      // Flush any pending packets queued while connection was establishing
+      const pending = this.pendingPackets.get(conn.peer);
+      if (pending && pending.length > 0) {
+        console.log(`[P2P Mesh] Flushing ${pending.length} pending packets to ${conn.peer}`);
+        pending.forEach((pkt) => {
+          try {
+            conn.send(pkt);
+          } catch (e) {
+            console.error('[P2P Mesh] Error sending flushed packet:', e);
+          }
+        });
+        this.pendingPackets.delete(conn.peer);
+      }
     });
 
     conn.on('data', (data: any) => {
       try {
         const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        if (parsed?.type === 'p2p_ping') return; // Ignore keepalives
         if (this.onPacketCallback && parsed) {
           this.onPacketCallback(parsed);
         }
@@ -159,36 +196,62 @@ export class P2PMeshNetwork {
     });
 
     conn.on('close', () => {
+      console.log('[P2P Mesh] WebRTC DataChannel closed with:', conn.peer);
       this.connections.delete(conn.peer);
     });
 
-    conn.on('error', () => {
+    conn.on('error', (err) => {
+      console.warn('[P2P Mesh] DataChannel error on', conn.peer, err);
       this.connections.delete(conn.peer);
     });
   }
 
-  private connectToPeer(targetAddressOrTag: string): DataConnection | null {
-    if (!this.peer || this.peer.destroyed) return null;
+  private getTargetPeerId(targetAddressOrTag: string): string {
+    const cleanTag = targetAddressOrTag
+      .replace('k256:0x', '')
+      .replace('#', '')
+      .replace('-', '')
+      .slice(0, 6)
+      .toLowerCase();
+    return `k256_${cleanTag}`;
+  }
 
-    const clean = targetAddressOrTag.replace('k256:0x', '').replace('#', '').replace('-', '').slice(0, 16);
-    const targetPeerId = `k256_${this.cleanId(clean)}`;
+  public sendDirectToPeer(targetAddressOrTag: string, packet: any) {
+    if (!this.peer || this.peer.destroyed) return;
 
-    if (this.connections.has(targetPeerId)) {
-      const existing = this.connections.get(targetPeerId);
-      if (existing?.open) return existing;
+    const targetPeerId = this.getTargetPeerId(targetAddressOrTag);
+    if (targetPeerId === this.getPrimaryPeerId()) return; // Don't send to self
+
+    const existing = this.connections.get(targetPeerId);
+
+    if (existing && existing.open) {
+      try {
+        existing.send(packet);
+        console.log('[P2P Mesh] Sent message directly to:', targetPeerId);
+        return;
+      } catch (err) {
+        console.warn('[P2P Mesh] Send failed, re-queueing:', err);
+      }
     }
 
-    try {
-      const conn = this.peer.connect(targetPeerId, { reliable: true });
-      this.setupConnection(conn);
-      return conn;
-    } catch {
-      return null;
+    // If connection not open or does not exist, queue packet and initiate connection
+    const queue = this.pendingPackets.get(targetPeerId) || [];
+    queue.push(packet);
+    this.pendingPackets.set(targetPeerId, queue);
+
+    if (!existing) {
+      try {
+        console.log('[P2P Mesh] Connecting to peer:', targetPeerId);
+        const conn = this.peer.connect(targetPeerId, { reliable: true });
+        this.setupConnection(conn);
+      } catch (err) {
+        console.warn('[P2P Mesh] Connect error:', err);
+      }
     }
   }
 
   /**
-   * Broadcast or send packet directly to peer across all available transports
+   * Broadcast packet across all local and P2P channels
    */
   public broadcast(packet: any) {
     const raw = typeof packet === 'string' ? packet : JSON.stringify(packet);
@@ -207,15 +270,10 @@ export class P2PMeshNetwork {
       } catch {}
     }
 
-    // 3. Direct P2P WebRTC DataChannel (across any 2 computers on the internet)
+    // 3. Direct WebRTC P2P target
     const target = packet.recipientAddress || packet.targetHashedAddress;
     if (target && target.toLowerCase() !== this.myAddress) {
-      const conn = this.connectToPeer(target);
-      if (conn && conn.open) {
-        try {
-          conn.send(packet);
-        } catch {}
-      }
+      this.sendDirectToPeer(target, packet);
     }
 
     // Also send to all established active direct connections
@@ -230,7 +288,7 @@ export class P2PMeshNetwork {
 
   public destroy() {
     this.isDestroyed = true;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.pingInterval) clearInterval(this.pingInterval);
     if (this.broadcastChannel) {
       try { this.broadcastChannel.close(); } catch {}
     }
@@ -241,6 +299,7 @@ export class P2PMeshNetwork {
       try { c.close(); } catch {}
     });
     this.connections.clear();
+    this.pendingPackets.clear();
     if (this.peer && !this.peer.destroyed) {
       try { this.peer.destroy(); } catch {}
     }

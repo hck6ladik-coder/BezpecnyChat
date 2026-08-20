@@ -469,6 +469,17 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setConversations((prev) => [newConv, ...prev]);
     setActiveConversationId(newId);
 
+    // Immediately initiate P2P WebRTC DataChannel connection and handshake
+    if (profile && p2pMeshRef.current) {
+      p2pMeshRef.current.sendDirectToPeer(peerAddress, {
+        type: 'peer_presence',
+        address: profile.address,
+        username: profile.username,
+        avatar: profile.avatar,
+        bundle: publicBundle,
+      });
+    }
+
     addAuditLog({
       type: 'handshake',
       title: 'Vytvořen nový zabezpečený kontakt',
