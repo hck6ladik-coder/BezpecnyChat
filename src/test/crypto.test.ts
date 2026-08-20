@@ -312,4 +312,52 @@ describe('Authentication, SIWE & 2FA TOTP', () => {
       decryptJson(encPayload, wrongSubkeys.vaultKey)
     ).rejects.toThrow();
   });
+
+  it('restores legacy accounts created with older iterations and different salts', async () => {
+    // 1. Account created in older version with legacy iterations (e.g. 50,000 / 20,000)
+    const userPass = 'MojeHeslo999!';
+    const userSalt = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
+    const legacyDerivation = await deriveMasterKey(userPass, userSalt, 20_000);
+    const legacySubkeys = deriveSubkeys(legacyDerivation.masterKey);
+
+    const oldProfile = {
+      address: 'k256:0x6666666666666666666666666666666666666666',
+      username: '6lado6',
+      bio: 'Původní účet vytvořený v předchozí verzi',
+      avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=6lado6',
+      createdAt: Date.now() - 100000,
+    };
+
+    const encOldProfile = await encryptJson(oldProfile, legacySubkeys.vaultKey);
+
+    // 2. Candidate salt & multi-iteration search matrix simulator (Phase 1 fast search)
+    const candidateSalts = [
+      'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', // global salt from another user
+      userSalt, // correct salt
+    ];
+
+    let recoveredProfile: typeof oldProfile | null = null;
+    let foundIteration = 0;
+
+    for (const salt of candidateSalts) {
+      for (const it of [10_000, 20_000, 5_000]) {
+        try {
+          const testDerivation = await deriveMasterKey(userPass, salt, it);
+          const testSubkeys = deriveSubkeys(testDerivation.masterKey);
+          const decrypted = await decryptJson<typeof oldProfile>(encOldProfile, testSubkeys.vaultKey);
+          if (decrypted && decrypted.username === '6lado6') {
+            recoveredProfile = decrypted;
+            foundIteration = it;
+            break;
+          }
+        } catch {}
+      }
+      if (recoveredProfile) break;
+    }
+
+    expect(recoveredProfile).not.toBeNull();
+    expect(recoveredProfile?.username).toBe('6lado6');
+    expect(recoveredProfile?.address).toBe('k256:0x6666666666666666666666666666666666666666');
+    expect(foundIteration).toBe(20_000);
+  });
 });

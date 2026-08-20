@@ -7,7 +7,7 @@ import { utf8ToBytes, bytesToHex, hexToBytes } from '@noble/hashes/utils';
  * Key Derivation Functions (KDF) leveraging KECCAK-256 as the core primitive.
  */
 
-export const PBKDF2_ITERATIONS = 20_000;
+export const PBKDF2_ITERATIONS = 10_000;
 
 /**
  * HKDF using KECCAK-256 for Double Ratchet and X3DH key derivation

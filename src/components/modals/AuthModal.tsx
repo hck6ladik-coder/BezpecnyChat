@@ -30,6 +30,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     isUnlocked,
     createIdentity,
     unlockVault,
+    changePassword,
     resetAccount,
     resetAllLocalData,
     profile,
@@ -47,6 +48,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   });
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Change password modal state
+  const [isResetPasswordModalOpen, setIsResetPasswordModalOpen] = useState(false);
+  const [newResetPassword, setNewResetPassword] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
 
   // Registration form state
   const [regUsername, setRegUsername] = useState('');
@@ -335,9 +342,119 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
 
               {loginError && (
-                <div className="p-2.5 bg-red-950/60 border border-red-800/80 rounded-xl text-xs text-red-300 flex items-center space-x-2">
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-red-400" />
-                  <span>{loginError}</span>
+                <div className="p-3 bg-red-950/70 border border-red-800/80 rounded-xl text-xs text-red-300 space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 text-red-400" />
+                    <span>{loginError}</span>
+                  </div>
+                  <div className="pt-1 border-t border-red-900/50 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetPasswordModalOpen(true);
+                        setResetPasswordError(null);
+                        setNewResetPassword('');
+                      }}
+                      className="text-[11px] text-cyber-400 hover:text-cyber-300 font-semibold underline transition-colors"
+                    >
+                      🔑 Nastavit nové heslo pro @{loginUsername.replace(/^@/, '').trim() || 'tento účet'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const clean = loginUsername.replace(/^@/, '').trim();
+                        if (window.confirm(`Opravdu chcete vyresetovat data účtu @${clean}?`)) {
+                          await resetAccount(clean);
+                          setRegUsername(clean);
+                          setLoginPassword('');
+                          setLoginError(null);
+                        }
+                      }}
+                      className="text-[10px] text-red-400 hover:text-red-300 underline"
+                    >
+                      Resetovat účet
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* POPUP: Change / Reset Password */}
+              {isResetPasswordModalOpen && (
+                <div className="p-3.5 bg-slate-900 border border-cyber-500/40 rounded-xl space-y-3 shadow-lg animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Key className="w-4 h-4 text-cyber-400" />
+                      <span className="text-xs font-bold text-slate-100">
+                        Nastavení nového hesla pro @{loginUsername.replace(/^@/, '').trim() || 'účet'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsResetPasswordModalOpen(false)}
+                      className="text-slate-400 hover:text-slate-200 text-xs p-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {resetPasswordError && (
+                    <div className="p-2 bg-red-950/60 border border-red-800 rounded-lg text-[11px] text-red-300">
+                      {resetPasswordError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <input
+                      type="password"
+                      placeholder="Zadejte nové heslo (min. 6 znaků)..."
+                      value={newResetPassword}
+                      onChange={(e) => setNewResetPassword(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyber-500"
+                    />
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        disabled={isResettingPassword || !newResetPassword || newResetPassword.length < 6}
+                        onClick={async () => {
+                          const clean = loginUsername.replace(/^@/, '').trim();
+                          if (!clean) {
+                            setResetPasswordError('Zadejte prosím přezdívku.');
+                            return;
+                          }
+                          setIsResettingPassword(true);
+                          setResetPasswordError(null);
+                          try {
+                            await changePassword(clean, newResetPassword);
+                            setNewResetPassword('');
+                            setIsResetPasswordModalOpen(false);
+                            setLoginError(null);
+                            onClose();
+                          } catch (err: any) {
+                            setResetPasswordError(err.message || 'Chyba při změně hesla.');
+                          } finally {
+                            setIsResettingPassword(false);
+                          }
+                        }}
+                        className="flex-1 py-2 px-3 bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-bold text-xs rounded-lg transition-all disabled:opacity-50 flex items-center justify-center space-x-1.5"
+                      >
+                        {isResettingPassword ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Ukládám heslo...</span>
+                          </>
+                        ) : (
+                          <span>Uložit nové heslo a přihlásit se</span>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsResetPasswordModalOpen(false)}
+                        className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg transition-all"
+                      >
+                        Zrušit
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -352,7 +469,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                       type="text"
                       placeholder="např. Honza, David..."
                       value={loginUsername}
-                      onChange={(e) => setLoginUsername(e.target.value)}
+                      onChange={(e) => {
+                        setLoginUsername(e.target.value);
+                        setLoginError(null);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyber-500/60 focus:ring-1 focus:ring-cyber-500/30 transition-all"
                     />
                   </div>
@@ -365,10 +485,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                         <button
                           key={acc.username}
                           type="button"
-                          onClick={() => setLoginUsername(acc.username)}
+                          onClick={() => {
+                            setLoginUsername(acc.username);
+                            setLoginPassword('');
+                            setLoginError(null);
+                          }}
                           className={`text-[10px] px-2 py-0.5 rounded-md border transition-all ${
                             loginUsername.toLowerCase() === acc.username.toLowerCase()
-                              ? 'bg-cyber-500/20 text-cyber-300 border-cyber-500/40 font-semibold'
+                              ? 'bg-cyber-500/20 text-cyber-300 border-cyber-500/40 font-semibold shadow-sm'
                               : 'bg-slate-850 text-slate-400 border-slate-700 hover:text-slate-200'
                           }`}
                         >
@@ -388,7 +512,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     type="password"
                     placeholder="Zadejte heslo k vašemu účtu..."
                     value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
+                    onChange={(e) => {
+                      setLoginPassword(e.target.value);
+                      setLoginError(null);
+                    }}
                     className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyber-500/60 focus:ring-1 focus:ring-cyber-500/30 transition-all"
                   />
                 </div>
@@ -407,23 +534,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     </span>
                   </label>
 
-                  {loginUsername && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const clean = loginUsername.replace(/^@/, '').trim();
-                        if (window.confirm(`Opravdu chcete na tomto zařízení resetovat účet @${clean}? Můžete si pro toto jméno ihned nastavit nové heslo.`)) {
-                          await resetAccount(clean);
-                          setRegUsername(clean);
-                          setLoginPassword('');
-                          setLoginError(null);
-                        }
-                      }}
-                      className="text-[10px] text-cyber-400 hover:text-cyber-300 underline transition-colors"
-                    >
-                      Resetovat účet / Nové heslo
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsResetPasswordModalOpen(true);
+                      setResetPasswordError(null);
+                      setNewResetPassword('');
+                    }}
+                    className="text-[11px] text-cyber-400 hover:text-cyber-300 underline transition-colors"
+                  >
+                    Zapomněli jste heslo?
+                  </button>
                 </div>
 
                 <button
