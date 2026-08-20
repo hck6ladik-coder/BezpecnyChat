@@ -182,33 +182,42 @@ V pravém horním rohu aplikace je k dispozici interaktivní panel **Kryptografi
 
 ---
 
-## 🚀 Rychlé Spuštění (Lokální provoz)
+## 🚀 Rychlé Spuštění (BEZ NUTNOSTI SPOUŠTĚT SERVER)
 
-### 1. Požadavky:
-* Node.js v18+ a npm
+Aplikace funguje **100% decentralizovaně (Serverless P2P)** a nevyžaduje spouštění žádného lokálního backend serveru v terminálu!
 
-### 2. Klonování repozitáře a instalace:
-```bash
-git clone https://github.com/hck6ladik-coder/BezpecnyChat.git
-cd BezpecnyChat
-npm install
-```
+---
 
-### 3. Spuštění testů (Vitest):
+### Možnost 1: 🖥️ Samostatná Desktopová Aplikace (Windows / Mac / Linux)
+1. Spusťte jedním příkazem nativní desktopové okno:
+   ```bash
+   npm run app
+   ```
+2. Nebo na Windows stačí **dvojklikem spustit soubor `Spustit-BezpecnyChat.bat`**.
+
+---
+
+### Možnost 2: 🌐 Živý Web (GitHub Pages / Serverless)
+- Otevřete přímo ve svém webovém prohlížeči:  
+  👉 **[https://hck6ladik-coder.github.io/BezpecnyChat/](https://hck6ladik-coder.github.io/BezpecnyChat/)**
+- Není potřeba nic instalovat ani stahovat. Zprávy a hovory probíhají přímo P2P mezi prohlížeči přes veřejné šifrované WSS MQTT a WebRTC brokery.
+
+---
+
+### Možnost 3: 📁 Přenosný HTML soubor (Offline / USB)
+1. Sestavte aplikaci:
+   ```bash
+   npm run build
+   ```
+2. Otevřete soubor `dist/index.html` v libovolném prohlížeči (Chrome, Firefox, Brave, Safari). Funguje okamžitě bez jakéhokoliv serveru!
+
+---
+
+### 🧪 Automatizované testy (Vitest)
 ```bash
 npm test
 ```
 *(Proběhne 21 kryptografických a bezpečnostních testů s 100% úspěšností)*
-
-### 4. Spuštění lokálního vývoje:
-```bash
-# Terminál 1: Spuštění WebSocket Relay Serveru
-npm run server
-
-# Terminál 2: Spuštění Vite Klientské Aplikace
-npm run dev
-```
-Aplikace se otevře na adrese: `http://localhost:5174/`
 
 ---
 

@@ -15,6 +15,7 @@ export type PacketHandler = (packet: any) => void;
 const PUBLIC_WSS_BROKERS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
+  'wss://test.mosquitto.org:8081/mqtt',
 ];
 
 export class P2PMeshNetwork {
