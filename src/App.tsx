@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CryptoProvider, useCrypto } from './context/CryptoContext';
 import { ChatProvider, useChat } from './context/ChatContext';
 import { WebRTCProvider } from './context/WebRTCContext';
@@ -16,7 +16,7 @@ import { ChatMessage } from './types/chat';
 
 const MainAppContent: React.FC = () => {
   const { isUnlocked } = useCrypto();
-  const { discoveredPeers } = useChat();
+  const { discoveredPeers, createDirectChat } = useChat();
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(!isUnlocked);
@@ -26,6 +26,27 @@ const MainAppContent: React.FC = () => {
   const [isNewContactOpen, setIsNewContactOpen] = useState<boolean>(false);
   const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
   const [inspectedMessage, setInspectedMessage] = useState<ChatMessage | null>(null);
+
+  // Auto-connect when opened via an invite link (#invite?addr=...&name=...)
+  useEffect(() => {
+    if (isUnlocked && window.location.hash.includes('invite')) {
+      try {
+        const hash = window.location.hash;
+        const query = hash.split('?')[1];
+        if (query) {
+          const params = new URLSearchParams(query);
+          const addr = params.get('addr');
+          const name = params.get('name');
+          if (addr) {
+            createDirectChat(addr, name || undefined);
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to parse invite link:', err);
+      }
+    }
+  }, [isUnlocked]);
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';

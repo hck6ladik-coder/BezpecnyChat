@@ -29,10 +29,14 @@ export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => 
   } = useChat();
 
   const filteredConversations = conversations.filter((c) => {
-    const q = searchQuery.toLowerCase();
-    const matchName = c.name.toLowerCase().includes(q);
-    const matchAddress = c.peerAddress?.toLowerCase().includes(q) || false;
-    return matchName || matchAddress;
+    const rawQ = searchQuery.toLowerCase().trim();
+    const cleanQ = rawQ.replace('#', '').replace('-', '');
+    const matchName = c.name.toLowerCase().includes(rawQ);
+    const matchAddress = c.peerAddress?.toLowerCase().includes(rawQ) || false;
+    const matchTag = c.peerAddress
+      ? c.peerAddress.replace('k256:0x', '').toLowerCase().includes(cleanQ)
+      : false;
+    return matchName || matchAddress || matchTag;
   });
 
   const formatTime = (timestamp?: number) => {

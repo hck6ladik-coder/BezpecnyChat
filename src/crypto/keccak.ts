@@ -72,4 +72,61 @@ export function generateBlindMailboxToken(recipientAddress: string, epochSalt: s
   return bytesToHex(keccak256(combined));
 }
 
+/**
+ * Generates a short, memorable 6-character user chat tag (e.g. #8D7-2AB)
+ */
+export function deriveShortChatTag(address: string): string {
+  const clean = address.replace('k256:0x', '').toLowerCase();
+  if (clean.length < 6) return address;
+  const p1 = clean.slice(0, 3).toUpperCase();
+  const p2 = clean.slice(3, 6).toUpperCase();
+  return `#${p1}-${p2}`;
+}
+
+/**
+ * Creates a 1-click shareable invite link for instant chat connection
+ */
+export function createInviteLink(address: string, username?: string): string {
+  const base = window.location.origin + window.location.pathname;
+  const params = new URLSearchParams();
+  params.set('addr', address);
+  if (username) params.set('name', username);
+  return `${base}#invite?${params.toString()}`;
+}
+
+/**
+ * Parses any user input: invite URL, short tag, @username or full k256 address
+ */
+export function parseInviteInput(input: string): { address?: string; username?: string; shortTag?: string } {
+  const trimmed = input.trim();
+
+  // 1. Check if it's an invite link
+  if (trimmed.includes('#invite?') || trimmed.includes('?addr=')) {
+    try {
+      const hashPart = trimmed.split('#invite?')[1] || trimmed.split('?')[1];
+      const params = new URLSearchParams(hashPart);
+      const addr = params.get('addr');
+      const name = params.get('name');
+      if (addr) return { address: addr, username: name || undefined };
+    } catch {}
+  }
+
+  // 2. Check if full k256 address
+  if (trimmed.startsWith('k256:0x') || (trimmed.startsWith('0x') && trimmed.length >= 42)) {
+    const addr = trimmed.startsWith('k256:0x') ? trimmed : `k256:${trimmed}`;
+    return { address: addr };
+  }
+
+  // 3. Check if short tag (e.g. #8D7-2AB or 8D72AB or 8D7-2AB)
+  const cleanTag = trimmed.replace('#', '').replace('-', '').trim();
+  if (cleanTag.length === 6 && /^[0-9a-fA-F]+$/.test(cleanTag)) {
+    return { shortTag: cleanTag.toLowerCase() };
+  }
+
+  // 4. Treat as username (e.g. @Honza or Honza)
+  const cleanName = trimmed.replace('@', '').trim();
+  return { username: cleanName };
+}
+
 export { bytesToHex, hexToBytes, utf8ToBytes };
+
