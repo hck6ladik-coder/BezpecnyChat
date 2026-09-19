@@ -32,7 +32,15 @@
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased selection:bg-cyber-500/30 selection:text-cyber-300">
-    <div id="root"></div>
+    <div id="root">
+      <nav aria-label="Hlavní navigace">
+        <a href="/">Bezpečný Chat</a>
+      </nav>
+      <main aria-label="Hlavní chat">
+        <h1>Bezpečný Chat - šifrované zprávy</h1>
+        <p>Studijní E2EE messenger s X3DH handshake, Double Ratchet a KECCAK-256 integritou zpráv.</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
