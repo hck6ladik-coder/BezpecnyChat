@@ -47,6 +47,21 @@ interface AuthModalProps {
   onClose: () => void;
 }
 
+const DEVICE_ID_STORAGE_KEY = 'bezpecny_chat_device_id';
+
+const getDeviceId = () => {
+  const stored = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  if (stored) return stored;
+
+  const deviceId = `BC-${crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}-${crypto
+    .randomUUID()
+    .replace(/-/g, '')
+    .slice(0, 4)
+    .toUpperCase()}`;
+  localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+  return deviceId;
+};
+
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const {
     isInitialized,
@@ -66,6 +81,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   // Active tab: 'login' | 'register'
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [deviceId] = useState(getDeviceId);
+  const [devicePassword, setDevicePassword] = useState('');
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const [deviceCopied, setDeviceCopied] = useState(false);
 
   // Country prefix (default +420)
   const [countryPrefix, setCountryPrefix] = useState('+420');
@@ -202,6 +222,161 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   }, [regPhoneInput, regCountryPrefix]);
 
   if (!isOpen) return null;
+
+  const handleDeviceLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeviceError(null);
+    if (devicePassword.length < 6) {
+      setDeviceError('Heslo musí mít alespoň 6 znaků.');
+      return;
+    }
+
+    setDeviceBusy(true);
+    try {
+      const success = await unlockVault(devicePassword, deviceId, true);
+      if (!success) {
+        setDeviceError('ID zařízení nebo heslo není správné.');
+        return;
+      }
+      if (profile?.has2FA) {
+        setNeeds2FA(true);
+        return;
+      }
+      setDevicePassword('');
+      onClose();
+    } catch (err: any) {
+      setDeviceError(err.message || 'Přihlášení se nepodařilo.');
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  const handleDeviceRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeviceError(null);
+    if (devicePassword.length < 6) {
+      setDeviceError('Heslo musí mít alespoň 6 znaků.');
+      return;
+    }
+
+    setDeviceBusy(true);
+    try {
+      await createIdentity(devicePassword, deviceId, true);
+      setDevicePassword('');
+      onClose();
+    } catch (err: any) {
+      setDeviceError(err.message || 'Registrace se nepodařila.');
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  const copyDeviceId = async () => {
+    await navigator.clipboard.writeText(deviceId);
+    setDeviceCopied(true);
+    window.setTimeout(() => setDeviceCopied(false), 1600);
+  };
+
+  const handleDevice2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoFAError(null);
+    setIs2FALoading(true);
+    try {
+      if (await verify2FA(totpCode)) {
+        setNeeds2FA(false);
+        setTotpCode('');
+        setDevicePassword('');
+        onClose();
+      } else {
+        setTwoFAError('Neplatný 2FA kód nebo záchranný kód.');
+      }
+    } catch (err: any) {
+      setTwoFAError(err.message || 'Ověření se nepodařilo.');
+    } finally {
+      setIs2FALoading(false);
+    }
+  };
+
+  if (needs2FA) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95">
+        <form onSubmit={handleDevice2FA} className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 text-slate-100">
+          <div>
+            <h2 className="text-lg font-semibold">Dvoufázové ověření</h2>
+            <p className="text-xs text-slate-400 mt-1">Zadejte kód z autentifikační aplikace.</p>
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoFocus
+            required
+            placeholder="000000"
+            value={totpCode}
+            onChange={(e) => setTotpCode(e.target.value)}
+            className="w-full px-3 py-3 bg-slate-950 border border-slate-700 rounded-xl text-center font-mono tracking-widest focus:outline-none focus:border-cyber-500"
+          />
+          {twoFAError && <p className="text-xs text-red-300">{twoFAError}</p>}
+          <button type="submit" disabled={is2FALoading} className="w-full py-2.5 rounded-xl bg-cyber-500 text-slate-950 font-semibold text-sm disabled:opacity-50">
+            {is2FALoading ? 'Ověřuji...' : 'Vstoupit do chatu'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95">
+      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-5 text-slate-100 shadow-xl">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Lock className="w-5 h-5 text-cyber-400" />
+            <h2 className="text-lg font-semibold">Bezpečný Chat</h2>
+          </div>
+          <p className="text-sm text-slate-400">Lokální účet chráněný heslem.</p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="block text-xs text-slate-400">ID tohoto zařízení</label>
+          <div className="flex gap-2">
+            <code className="flex-1 min-w-0 px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm text-cyber-300 truncate">{deviceId}</code>
+            <button type="button" onClick={copyDeviceId} className="px-3 rounded-xl bg-slate-800 border border-slate-700 text-xs text-slate-300 hover:text-white">
+              {deviceCopied ? 'Zkopírováno' : 'Kopírovat'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500">ID zůstává pouze v tomto prohlížeči. Pro obnovu účtu si ho bezpečně uložte.</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1 p-1 bg-slate-950 border border-slate-800 rounded-xl">
+          <button type="button" onClick={() => { setActiveTab('login'); setDeviceError(null); }} className={`py-2 rounded-lg text-sm font-medium ${activeTab === 'login' ? 'bg-cyber-500 text-slate-950' : 'text-slate-400'}`}>
+            Přihlásit
+          </button>
+          <button type="button" onClick={() => { setActiveTab('register'); setDeviceError(null); }} className={`py-2 rounded-lg text-sm font-medium ${activeTab === 'register' ? 'bg-cyber-500 text-slate-950' : 'text-slate-400'}`}>
+            Registrovat
+          </button>
+        </div>
+
+        <form onSubmit={activeTab === 'login' ? handleDeviceLogin : handleDeviceRegister} className="space-y-3">
+          <input
+            type="password"
+            required
+            minLength={6}
+            placeholder="Heslo, minimálně 6 znaků"
+            value={devicePassword}
+            onChange={(e) => setDevicePassword(e.target.value)}
+            className="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm focus:outline-none focus:border-cyber-500"
+          />
+          {deviceError && <p className="text-xs text-red-300">{deviceError}</p>}
+          <button type="submit" disabled={deviceBusy} className="w-full py-2.5 rounded-xl bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-semibold text-sm disabled:opacity-50">
+            {deviceBusy ? 'Pracuji...' : activeTab === 'login' ? 'Odemknout trezor' : 'Vytvořit účet'}
+          </button>
+        </form>
+
+        <button type="button" onClick={async () => { await resetAllLocalData(); window.location.reload(); }} className="w-full text-xs text-slate-500 hover:text-red-400">
+          Resetovat toto zařízení
+        </button>
+      </div>
+    </div>
+  );
 
   // Build full login identifier
   const getFullLoginPhone = () => {

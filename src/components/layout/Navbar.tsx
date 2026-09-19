@@ -40,23 +40,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { isOnline, offlineQueueCount } = useChat();
 
   return (
-    <header className="h-16 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between z-30 select-none">
+    <header className="h-16 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between gap-2 z-30 select-none">
       {/* Brand & Security Status */}
-      <div className="flex items-center space-x-3">
-        <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-cyber-600 to-cyber-400 text-slate-950 font-bold shadow-lg shadow-cyber-500/20">
+      <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+        <div className="relative flex-shrink-0 flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-cyber-600 to-cyber-400 text-slate-950 font-bold shadow-lg shadow-cyber-500/20">
           <Shield className="w-6 h-6 text-slate-950" />
           <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 border-2 border-slate-900 rounded-full" />
         </div>
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-base tracking-wide bg-gradient-to-r from-slate-100 via-cyber-200 to-cyber-400 bg-clip-text text-transparent">
+          <div className="flex items-center space-x-2 min-w-0">
+            <span className="font-bold text-sm sm:text-base tracking-wide truncate bg-gradient-to-r from-slate-100 via-cyber-200 to-cyber-400 bg-clip-text text-transparent">
               KECCAK256 E2EE Chat
             </span>
-            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-cyber-500/10 text-cyber-400 border border-cyber-500/30">
+            <span className="hidden sm:inline text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-cyber-500/10 text-cyber-400 border border-cyber-500/30">
               Signal Protocol + PFS
             </span>
           </div>
-          <div className="flex items-center space-x-3 text-xs text-slate-400">
+          <div className="hidden sm:flex items-center space-x-3 text-xs text-slate-400">
             <span className="flex items-center space-x-1 font-mono text-[11px] text-cyber-300">
               <span className="w-1.5 h-1.5 rounded-full bg-cyber-400 animate-pulse"></span>
               <span>Zero-Metadata Relay</span>
@@ -98,7 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Right control buttons */}
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-1 sm:space-x-2 flex-shrink-0">
         {/* Crypto Inspector Button */}
         <button
           onClick={onOpenInspector}
@@ -137,7 +137,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="font-semibold text-slate-200 hidden sm:inline max-w-[140px] truncate">
                 {profile.displayPhone ? `📱 ${profile.displayPhone}` : (profile.username || 'Uživatel')}
               </span>
-              <span className="text-[10px] font-mono text-cyber-300 bg-cyber-500/10 px-1.5 py-0.5 rounded-md border border-cyber-500/30">
+              <span className="hidden sm:inline text-[10px] font-mono text-cyber-300 bg-cyber-500/10 px-1.5 py-0.5 rounded-md border border-cyber-500/30">
                 {formatKeccakAddress(profile.address)}
               </span>
             </button>
@@ -156,7 +156,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyber-500 hover:bg-cyber-400 text-slate-950 font-semibold text-xs transition-all shadow-md shadow-cyber-500/20"
           >
             <Unlock className="w-4 h-4" />
-            <span>Odemknout Trezor</span>
+            <span className="hidden sm:inline">Odemknout Trezor</span>
           </button>
         )}
       </div>

@@ -14,7 +14,7 @@ import { ChatMessage } from './types/chat';
 
 const MainAppContent: React.FC = () => {
   const { isUnlocked } = useCrypto();
-  const { discoveredPeers, createDirectChat } = useChat();
+  const { createDirectChat, activeConversationId, setActiveConversationId } = useChat();
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(!isUnlocked);
@@ -85,10 +85,13 @@ const MainAppContent: React.FC = () => {
         <ChatList
           onNewChat={() => setIsNewContactOpen(true)}
           onNewGroup={() => setIsGroupCreateOpen(true)}
+          isMobileChatOpen={Boolean(activeConversationId)}
         />
         <ChatWindow
           onOpenSafetyNumber={() => setIsSafetyOpen(true)}
           onInspectMessageCrypto={handleInspectMessageCrypto}
+          onMobileBack={() => setActiveConversationId(null)}
+          isMobileChatOpen={Boolean(activeConversationId)}
         />
       </div>
 

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  ArrowLeft,
   ShieldCheck,
   ShieldAlert,
   Flame,
@@ -28,11 +29,15 @@ import { CrisisSafetyModal } from '../modals/CrisisSafetyModal';
 interface ChatWindowProps {
   onOpenSafetyNumber: () => void;
   onInspectMessageCrypto: (msg: ChatMessage) => void;
+  onMobileBack: () => void;
+  isMobileChatOpen: boolean;
 }
 
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   onOpenSafetyNumber,
   onInspectMessageCrypto,
+  onMobileBack,
+  isMobileChatOpen,
 }) => {
   const {
     activeConversation,
@@ -146,11 +151,18 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   ];
 
   return (
-    <main className="flex-1 h-full bg-slate-950 flex flex-col min-w-0">
+    <main className={`${isMobileChatOpen ? 'flex' : 'hidden md:flex'} flex-1 h-full bg-slate-950 flex-col min-w-0`}>
       {/* Header */}
       <div className="h-16 px-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between select-none">
         {/* Contact info */}
-        <div className="flex items-center space-x-3 min-w-0">
+        <div className="flex items-center space-x-2 min-w-0">
+          <button
+            onClick={onMobileBack}
+            className="md:hidden p-2 -ml-1 rounded-lg text-slate-300 hover:bg-slate-800"
+            title="Zpět na seznam chatů"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
           <div className="relative">
             <img
               src={activeConversation.avatar}

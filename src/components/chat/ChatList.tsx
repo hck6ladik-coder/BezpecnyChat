@@ -20,9 +20,10 @@ import { FriendsList } from './FriendsList';
 interface ChatListProps {
   onNewChat: () => void;
   onNewGroup: () => void;
+  isMobileChatOpen: boolean;
 }
 
-export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => {
+export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup, isMobileChatOpen }) => {
   const {
     conversations,
     activeConversationId,
@@ -60,7 +61,7 @@ export const ChatList: React.FC<ChatListProps> = ({ onNewChat, onNewGroup }) => 
   };
 
   return (
-    <aside className="w-full md:w-80 lg:w-96 h-full bg-slate-900/90 border-r border-slate-800 flex flex-col select-none">
+    <aside className={`${isMobileChatOpen ? 'hidden md:flex' : 'flex'} w-full md:w-80 lg:w-96 h-full bg-slate-900/90 border-r border-slate-800 flex-col select-none`}>
       {/* Tab Switcher Header */}
       <div className="p-2.5 border-b border-slate-800 bg-slate-950/40">
         <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950/80 border border-slate-800 rounded-xl">
