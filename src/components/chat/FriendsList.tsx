@@ -3,7 +3,6 @@ import {
   Users,
   UserPlus,
   MessageSquare,
-  Phone,
   Trash2,
   Search,
   CheckCircle2,
@@ -12,7 +11,6 @@ import {
 } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { useCrypto } from '../../context/CryptoContext';
-import { useWebRTC } from '../../context/WebRTCContext';
 
 interface FriendsListProps {
   onAddFriend: () => void;
@@ -22,7 +20,6 @@ interface FriendsListProps {
 export const FriendsList: React.FC<FriendsListProps> = ({ onAddFriend, onOpenChat }) => {
   const { friends, removeFriend } = useChat();
   const { profile } = useCrypto();
-  const { startCall } = useWebRTC();
   const [search, setSearch] = useState('');
   const [copiedTag, setCopiedTag] = useState<string | null>(null);
 
@@ -39,10 +36,6 @@ export const FriendsList: React.FC<FriendsListProps> = ({ onAddFriend, onOpenCha
     navigator.clipboard.writeText(tag);
     setCopiedTag(tag);
     setTimeout(() => setCopiedTag(null), 2000);
-  };
-
-  const handleStartCall = (friend: typeof friends[0]) => {
-    startCall(friend.address, friend.username, friend.avatar, 'audio');
   };
 
   return (
@@ -151,13 +144,6 @@ export const FriendsList: React.FC<FriendsListProps> = ({ onAddFriend, onOpenCha
                   title="Napsat zprávu"
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => handleStartCall(friend)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700/70 transition-all"
-                  title="Zahájit E2EE hovor"
-                >
-                  <Phone className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => handleCopyTag(friend.shortTag)}

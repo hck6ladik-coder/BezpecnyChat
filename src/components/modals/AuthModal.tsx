@@ -487,19 +487,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md select-none animate-in fade-in">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-7 space-y-5 text-slate-100 max-h-[95vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 select-none animate-in fade-in">
+      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-xl p-5 sm:p-6 space-y-4 text-slate-100 max-h-[95vh] overflow-y-auto">
         {/* App Branding Header */}
         <div className="text-center space-y-1.5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyber-600 to-cyber-400 text-slate-950 flex items-center justify-center mx-auto shadow-lg shadow-cyber-500/25">
-            <Smartphone className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl bg-cyber-500 text-slate-950 flex items-center justify-center mx-auto">
+            <Lock className="w-5 h-5" />
           </div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-100">
-            Bezpečný Chat
-          </h2>
-          <p className="text-xs text-slate-400">
-            Telefonní přihlášení s KECCAK-256 E2EE šifrováním
-          </p>
+          <h2 className="text-lg font-bold text-slate-100">Bezpečný Chat</h2>
+          <p className="text-xs text-slate-400">Přihlášení do šifrovaného trezoru</p>
         </div>
 
         {/* Tab switcher: Přihlášení vs Registrace */}
@@ -532,7 +528,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             }`}
           >
             <UserPlus className="w-3.5 h-3.5" />
-            <span>Registrace nového čísla</span>
+            <span>Nový účet</span>
           </button>
         </div>
 
@@ -540,7 +536,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         <div className="flex items-center justify-between text-xs px-1 py-0.5">
           <div className="flex items-center space-x-1.5 text-slate-400">
             <Flame className="w-3.5 h-3.5 text-amber-500" />
-            <span className="text-[11px]">Firebase Phone Auth:</span>
+            <span className="text-[11px]">SMS ověření:</span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${isFirebaseConfigured() ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'}`}>
               {isFirebaseConfigured() ? 'Nakonfigurováno' : 'Výchozí režim'}
             </span>
@@ -554,7 +550,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             className="text-[11px] text-cyber-400 hover:text-cyber-300 flex items-center space-x-1 underline transition-colors"
           >
             <Settings className="w-3 h-3" />
-            <span>{isFirebaseSettingsOpen ? 'Zavřít nastavení' : '⚙️ Nastavení Firebase'}</span>
+            <span>{isFirebaseSettingsOpen ? 'Zavřít' : 'Nastavení SMS'}</span>
           </button>
         </div>
 

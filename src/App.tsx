@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { CryptoProvider, useCrypto } from './context/CryptoContext';
 import { ChatProvider, useChat } from './context/ChatContext';
-import { WebRTCProvider } from './context/WebRTCContext';
 import { Navbar } from './components/layout/Navbar';
 import { ChatList } from './components/chat/ChatList';
 import { ChatWindow } from './components/chat/ChatWindow';
 import { AuthModal } from './components/modals/AuthModal';
 import { SafetyNumberModal } from './components/modals/SafetyNumberModal';
-import { WebRTCCallModal } from './components/modals/WebRTCCallModal';
 import { GroupCreateModal } from './components/modals/GroupCreateModal';
 import { UserProfileModal } from './components/modals/UserProfileModal';
 import { NewContactModal } from './components/modals/NewContactModal';
@@ -110,8 +108,6 @@ const MainAppContent: React.FC = () => {
         onClose={() => setIsSafetyOpen(false)}
       />
 
-      <WebRTCCallModal />
-
       <GroupCreateModal
         isOpen={isGroupCreateOpen}
         onClose={() => setIsGroupCreateOpen(false)}
@@ -138,9 +134,7 @@ export default function App() {
   return (
     <CryptoProvider>
       <ChatProvider>
-        <WebRTCProvider>
-          <MainAppContent />
-        </WebRTCProvider>
+        <MainAppContent />
       </ChatProvider>
     </CryptoProvider>
   );

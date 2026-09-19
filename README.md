@@ -1,15 +1,16 @@
-# 🛡️ Bezpečný Chat — KECCAK-256 End-to-End Encrypted Messenger
+# 🛡️ Bezpečný Chat — E2EE Messenger s Double Ratchet protokolem (Signal-style)
 
 <div align="center">
 
 [![Live Demo](https://img.shields.io/badge/🌐_Živá_Aplikace-Plně_Funkční-00f0ff?style=for-the-badge&logo=react&logoColor=black)](https://hck6ladik-coder.github.io/BezpecnyChat/)
 [![Status](https://img.shields.io/badge/Stav-100%25_Funkční_%26_Otestováno-10b981?style=for-the-badge&logo=checkmarx&logoColor=white)](https://github.com/hck6ladik-coder/BezpecnyChat)
-[![Tests Passing](https://img.shields.io/badge/Vitest-21%2F21_Passing-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/hck6ladik-coder/BezpecnyChat)
+[![Tests Passing](https://img.shields.io/badge/Vitest-29%2F29_Passing-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/hck6ladik-coder/BezpecnyChat)
+[![CI Tests](https://github.com/hck6ladik-coder/BezpecnyChat/actions/workflows/test.yml/badge.svg)](https://github.com/hck6ladik-coder/BezpecnyChat/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
-[![Security](https://img.shields.io/badge/Crypto-KECCAK--256_%2B_Signal_Protocol-8b5cf6?style=for-the-badge&logo=shield)](docs/SECURITY_AUDIT.md)
+[![Security](https://img.shields.io/badge/Crypto-KECCAK--256_%2B_Signal_Protocol-8b5cf6?style=for-the-badge&logo=shield)](docs/THREAT_MODEL.md)
 
 <p align="center">
-  <strong>Decentralizovaný, plně funkční zero-knowledge komunikační systém s nekompromisním šifrováním KECCAK-256, protokolem Double Ratchet, krizovým Safety Guardem a analýzou sentimentu DistilBERT.</strong>
+  <strong>Zero-knowledge komunikační systém implementující X3DH handshake, Double Ratchet a KECCAK-256 pro integritu zpráv. Postaveno jako studie moderních end-to-end šifrovacích protokolů.</strong>
 </p>
 
 </div>
@@ -126,6 +127,8 @@ Před zašifrováním každé zprávy proběhne blesková lokální analýza na 
 
 ## 🧠 Hugging Face DistilBERT Analýza Sentimentu
 
+> ⚠️ **Poznámka k architektuře:** Analýza sentimentu běží nad plaintextem a je odesílána na externí Hugging Face Inference API. To je záměrný kompromis mezi funkcí a čistě zero-knowledge modelem: pokud je tato funkce zapnutá, obsah zprávy dočasně opouští E2EE hranici směrem ke třetí straně. Při nedostupnosti API se použije lokální fallback analyzátor.
+
 * Aplikace využívá model `distilbert-base-uncased-finetuned-sst-2-english` přímo přes Hugging Face Inference API.
 * V reálném čase přidává k odesílaným i přijímaným zprávám diskrétní štítek sentimentu (např. `✨😊 98% Pozitivní` nebo `😟 Negativní`).
 * V případě výpadku sítě plynule přepíná na integrovaný lokální heuristický analyzátor.
@@ -164,14 +167,14 @@ V pravém horním rohu aplikace je k dispozici interaktivní panel **Kryptografi
 ├── docs/
 │   ├── screenshots/            # Vložené ukázky rozhraní
 │   ├── ARCHITECTURE.md         # Kompletní architektura a návrh
-│   ├── SECURITY_AUDIT.md       # Bezpečnostní audit a analýza hrozeb
+│   ├── THREAT_MODEL.md         # Autorská analýza hrozeb a bezpečnostního designu
 │   ├── API.md                  # Dokumentace WebSocket protokolu a packetů
 │   └── DEPLOYMENT.md           # Návod na produkční nasazení a Tor konfiguraci
 ├── server/
 │   └── server.ts               # Zero-Metadata WebSocket Relay Server (Port 8080)
 ├── src/
 │   ├── components/             # React UI komponenty (Chat, Hovory, Modály, Inspektor)
-│   ├── context/                # React Contexty (CryptoContext, ChatContext, WebRTCContext)
+│   ├── context/                # React Contexty (CryptoContext, ChatContext)
 │   ├── crypto/                 # Kryptografické jádro (keccak, kdf, aes, x3dh, ratchet, senderKey)
 │   ├── services/               # Safety Guard (krizové linky) a DistilBERT sentiment
 │   ├── test/                   # Vitest automatizované testy (21 testů)
@@ -225,4 +228,4 @@ npm test
 
 Tento projekt je licencován pod otevřenou licencí [MIT](LICENSE).
 
-Podrobnou analýzu hrozeb a kryptografické ověření naleznete v souboru [docs/SECURITY_AUDIT.md](docs/SECURITY_AUDIT.md).
+Podrobnou analýzu hrozeb a kryptografický design naleznete v souboru [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).

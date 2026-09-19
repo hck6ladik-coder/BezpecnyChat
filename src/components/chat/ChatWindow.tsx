@@ -1,7 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Phone,
-  Video,
   ShieldCheck,
   ShieldAlert,
   Flame,
@@ -21,7 +19,6 @@ import {
 } from 'lucide-react';
 import { useChat } from '../../context/ChatContext';
 import { useCrypto } from '../../context/CryptoContext';
-import { useWebRTC } from '../../context/WebRTCContext';
 import { MessageBubble } from './MessageBubble';
 import { SelfDestructDuration, ChatMessage } from '../../types/chat';
 import { formatKeccakAddress } from '../../crypto/keccak';
@@ -47,7 +44,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     unblockContact,
   } = useChat();
 
-  const { startCall } = useWebRTC();
   const [inputText, setInputText] = useState('');
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -206,38 +202,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         {/* Right header actions */}
         <div className="flex items-center space-x-1 sm:space-x-2">
-          {/* WebRTC Audio Call */}
-          <button
-            onClick={() =>
-              startCall(
-                activeConversation.peerAddress || activeConversation.id,
-                activeConversation.name,
-                activeConversation.avatar,
-                'audio'
-              )
-            }
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-cyber-300 transition-colors"
-            title="Šifrovaný hlasový hovor (WebRTC + SAS ověření)"
-          >
-            <Phone className="w-4 h-4" />
-          </button>
-
-          {/* WebRTC Video Call */}
-          <button
-            onClick={() =>
-              startCall(
-                activeConversation.peerAddress || activeConversation.id,
-                activeConversation.name,
-                activeConversation.avatar,
-                'video'
-              )
-            }
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-cyber-300 transition-colors"
-            title="Šifrovaný videohovor (WebRTC)"
-          >
-            <Video className="w-4 h-4" />
-          </button>
-
           {/* Self-destruct setting dropdown */}
           <div className="relative">
             <select

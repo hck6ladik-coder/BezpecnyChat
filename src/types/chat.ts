@@ -71,20 +71,6 @@ export interface UserProfile {
   createdAt: number;
 }
 
-export interface WebRTCCallSession {
-  callId: string;
-  peerAddress: string;
-  peerName: string;
-  peerAvatar: string;
-  type: 'audio' | 'video';
-  status: 'idle' | 'calling' | 'incoming' | 'connected' | 'ended';
-  sasCode: string; // Short Authentication String for E2EE voice check
-  isMuted: boolean;
-  isVideoOff: boolean;
-  isScreenSharing: boolean;
-  durationSec: number;
-}
-
 export interface FriendContact {
   address: string;
   username: string;

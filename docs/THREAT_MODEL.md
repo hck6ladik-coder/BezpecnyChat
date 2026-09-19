@@ -1,6 +1,8 @@
-# Zpráva o Bezpečnostním Auditu a Analýze Hrozeb (Security Audit)
+# Zpráva o Analýze Hrozeb a Bezpečnostním Designu
 
-Tento dokument shrnuje formální bezpečnostní analýzu a ověření kryptografických invariantů aplikace **KECCAK256 E2EE Chat**.
+Toto je autorská analýza hrozeb a bezpečnostního designu, nikoli nezávislý externí audit třetí stranou.
+
+Tento dokument shrnuje bezpečnostní analýzu a ověření kryptografických invariantů aplikace **KECCAK256 E2EE Chat**.
 
 ---
 
