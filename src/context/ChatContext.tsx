@@ -21,7 +21,6 @@ import {
 import { generateUserPrekeys, createPublicPrekeyBundle, UserPrekeyBundle } from '../crypto/x3dh';
 import { computeSafetyNumber } from '../crypto/safetyNumbers';
 import { analyzeSentimentDistilBert, analyzeLocalSentiment } from '../services/sentimentService';
-import { detectCrisisIntent } from '../services/safetyGuard';
 import { P2PMeshNetwork } from '../services/p2pMesh';
 
 export interface DiscoveredPeer {
@@ -242,7 +241,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         (myClean.length >= 6 && recClean.startsWith(myClean.slice(0, 6)));
 
       if (isForMe) {
-        const crisisCheck = detectCrisisIntent(data.content || '');
         const sentiment = data.sentiment || analyzeLocalSentiment(data.content || '');
 
         const incomingMsg: ChatMessage = {
@@ -261,7 +259,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           selfDestructTimer: data.selfDestructTimer || 'off',
           expiresAt: data.expiresAt,
           sentiment,
-          isCrisisFlagged: crisisCheck.isTriggered,
         };
 
         // Add message if not duplicate
@@ -431,7 +428,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const integrityTag = computeKeccakTag(content, Date.now());
-    const crisisCheck = detectCrisisIntent(content);
     const initialSentiment = analyzeLocalSentiment(content);
 
     const newMsg: ChatMessage = {
@@ -451,7 +447,6 @@ export const ChatProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       selfDestructTimer: conv.selfDestructSetting,
       expiresAt,
       sentiment: initialSentiment,
-      isCrisisFlagged: crisisCheck.isTriggered,
     };
 
     // Perform Cryptographic Operation

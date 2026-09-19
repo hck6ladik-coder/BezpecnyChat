@@ -23,8 +23,6 @@ import { useCrypto } from '../../context/CryptoContext';
 import { MessageBubble } from './MessageBubble';
 import { SelfDestructDuration, ChatMessage } from '../../types/chat';
 import { formatKeccakAddress } from '../../crypto/keccak';
-import { detectCrisisIntent, CrisisDetectionResult } from '../../services/safetyGuard';
-import { CrisisSafetyModal } from '../modals/CrisisSafetyModal';
 
 interface ChatWindowProps {
   onOpenSafetyNumber: () => void;
@@ -53,14 +51,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
-  // Safety Guard state
-  const [isCrisisModalOpen, setIsCrisisModalOpen] = useState(false);
-  const [crisisResult, setCrisisResult] = useState<CrisisDetectionResult | null>(null);
-  const [pendingCrisisMessage, setPendingCrisisMessage] = useState<{
-    text: string;
-    file?: File;
-  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -93,30 +83,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     const textToSend = inputText.trim();
     const fileToSend = selectedFile || undefined;
 
-    // Bilingual Safety Guard: Lightning-fast check for crisis keywords BEFORE encryption
-    if (textToSend) {
-      const detection = detectCrisisIntent(textToSend);
-      if (detection.isTriggered) {
-        setCrisisResult(detection);
-        setPendingCrisisMessage({ text: textToSend, file: fileToSend });
-        setIsCrisisModalOpen(true);
-        return; // Intercept sending until confirmed
-      }
-    }
-
     setInputText('');
     setSelectedFile(null);
 
     await sendMessage(textToSend, fileToSend);
-  };
-
-  const handleProceedCrisisSend = async () => {
-    if (!pendingCrisisMessage) return;
-    const { text, file } = pendingCrisisMessage;
-    setInputText('');
-    setSelectedFile(null);
-    setPendingCrisisMessage(null);
-    await sendMessage(text, file);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -386,13 +356,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         </form>
       </div>
 
-      {/* Bilingual Crisis Safety Guard Modal */}
-      <CrisisSafetyModal
-        isOpen={isCrisisModalOpen}
-        onClose={() => setIsCrisisModalOpen(false)}
-        detectionResult={crisisResult}
-        onProceedAnyway={handleProceedCrisisSend}
-      />
     </main>
   );
 };

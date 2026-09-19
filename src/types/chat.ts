@@ -33,7 +33,6 @@ export interface ChatMessage {
     emoji: string;
     czechLabel: string;
   };
-  isCrisisFlagged?: boolean;
 }
 
 export interface ChatConversation {

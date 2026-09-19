@@ -57,7 +57,6 @@
 * **Signal Protokol (X3DH + Double Ratchet)**:
   * **Perfect Forward Secrecy (PFS)**: Kompromitace jednoho klíče neohrozí minulé zprávy.
   * **Post-Compromise Security (PCS)**: Systém se po narušení sám zahojí s každým novým krokem ratchetu.
-* **Bilingual Safety Guard (CZ/EN)**: Blesková lokální kontrola krizových stavů před zašifrováním s okamžitým proklikem na bezplatné linky důvěry.
 * **AI Sentiment Insight (DistilBERT)**: Vyhodnocení tónu zpráv pomocí neuronového modelu s lokální offline zálohou.
 * **Skartace zpráv**: Automatické lokální a kryptografické mazání s odpočtem času (5s až 30 dní).
 * **Šifrovaný přenos souborů**: Bezpečné sdílení obrázků a dokumentů až do velikosti 500 MB (AES-256-GCM).
@@ -74,7 +73,6 @@
 | **Posun klíčů relace** | `Double Ratchet Algorithm` | Neustálý posun klíčů s každou odeslanou i přijatou zprávou (KDF chain + DH ratchet) |
 | **Skupinový chat** | `Sender Key Protocol` | Efektivní a bezpečné $O(1)$ šifrování skupinové komunikace |
 | **Derivace hlavního klíče** | `PBKDF2-HMAC-SHA256` (210 000 iterací) | Ochrana lokálního trezoru v IndexedDB heslem uživatele |
-| **WebRTC hovory** | `DTLS-SRTP` + `KECCAK SAS Code` | Hlasové a video hovory s ověřením SAS (Short Authentication String) |
 
 ```
                                  [ UŽIVATEL A ]
@@ -83,22 +81,19 @@
                   ▼                                         ▼
          [ Safety Guard Scan ]                     [ Master Password ]
       (Lokální kontrola CZ/EN)                              │ (PBKDF2: 210k iterací)
-                  │ (OK)                                    ▼
-                  ▼                                [ IndexedDB Vault ]
-         [ Plaintext Zprávy ]                     (Klíče Identity & Pre-keys)
-                  │                                         │
                   ▼                                         ▼
-         [ KECCAK256 Tag ] ────────┐               [ Double Ratchet ]
+            [ Plaintext Zprávy ]                     [ Master Password ]
+                  │                                         │ (PBKDF2: 210k iterací)
+                  ▼                                         ▼
+            [ KECCAK256 Tag ]                           [ IndexedDB Vault ]
+                  │                              (Klíče Identity & Pre-keys)
                   │                 │              (PFS & PCS KDF Step)
+                  ▼                                         ▼
+            [ AES-256-GCM Encrypt ] ◄──┴────────────── [ Double Ratchet ]
+                  │
                   ▼                 │                       │
-         [ AES-256-GCM Encrypt ] ◄──┴───────────────────────┘
+            [ Šifrovaný Balíček ] ◄────┴───────────────────────┘
                   │
-                  ▼
-         [ Šifrovaný Balíček ]
-                  │
-                  ▼ (WebSocket Relay / Port 8080 - Zero-Knowledge)
-                  │
-                                 [ UŽIVATEL B ]
                                        │
                   ▼                                         ▼
          [ Double Ratchet Decrypt ] ◄────────────── [ Ověření Integrity ]
@@ -108,20 +103,6 @@
 ```
 
 ---
-
-## 🚑 Bilingual Safety Guard (CZ / EN)
-
-Před zašifrováním každé zprávy proběhne blesková lokální analýza na přítomnost krizových indikátorů (např. myšlenky na sebepoškozování, sebevraždu či extrémní tíseň).
-
-* Pokud je zachycen krizový stav, aplikace odeslání pozastaví a zobrazí empatický dialog s možností okamžitého vytočení bezplatné pomoci:
-
-| Organizace / Linka | Číslo (Direct Call) | Jazyk & Dostupnost |
-| :--- | :--- | :--- |
-| **Linka bezpečí (Děti a mládež)** | [`116 111`](tel:116111) | 🇨🇿 Zdarma, 24/7, anonymní |
-| **Linka první psychické pomoci (Dospělí)** | [`116 123`](tel:116123) | 🇨🇿 Zdarma, 24/7, krizová intervence |
-| **Centrum krizové intervence Bohnice** | [`284 016 666`](tel:284016666) | 🇨🇿 Nonstop akutní psychiatrická pomoc |
-| **988 Suicide & Crisis Lifeline** | [`988`](tel:988) | 🇺🇸 / 🇬🇧 Free & Confidential 24/7 |
-| **Tísňová linka SOS** | [`112`](tel:112) | 🇪🇺 Všeobecná záchranná služba |
 
 ---
 
@@ -142,12 +123,6 @@ Každý chat umožňuje nastavit časovač samosmazání:
 * Po uplynutí stanovené doby je zpráva nenávratně odstraněna z paměti i lokálního šifrovaného úložiště IndexedDB.
 
 ---
-
-## 📞 WebRTC Šifrované Hovory a SAS
-
-1. Přímé P2P hlasové a video hovory přes WebRTC.
-2. Zabezpečeno funkcí **Short Authentication String (SAS)** vypočtenou z `KECCAK256(CallID + ÚčastníkA + ÚčastníkB)`.
-3. Uživatelé si porovnají krátký 6ciferný kód (např. `412-890`), čímž matematicky vyloučí jakýkoliv pokus o odposlech či Man-in-the-Middle útok.
 
 ---
 
@@ -176,7 +151,7 @@ V pravém horním rohu aplikace je k dispozici interaktivní panel **Kryptografi
 │   ├── components/             # React UI komponenty (Chat, Hovory, Modály, Inspektor)
 │   ├── context/                # React Contexty (CryptoContext, ChatContext)
 │   ├── crypto/                 # Kryptografické jádro (keccak, kdf, aes, x3dh, ratchet, senderKey)
-│   ├── services/               # Safety Guard (krizové linky) a DistilBERT sentiment
+│   ├── services/               # DistilBERT sentiment a P2P služby
 │   ├── test/                   # Vitest automatizované testy (21 testů)
 │   └── types/                  # TypeScript datové typy a rozhraní
 ├── vite.config.ts              # Konfigurace Vite bundleru
@@ -203,7 +178,7 @@ Aplikace funguje **100% decentralizovaně (Serverless P2P)** a nevyžaduje spou�
 ### Možnost 2: 🌐 Živý Web (GitHub Pages / Serverless)
 - Otevřete přímo ve svém webovém prohlížeči:  
   👉 **[https://hck6ladik-coder.github.io/BezpecnyChat/](https://hck6ladik-coder.github.io/BezpecnyChat/)**
-- Není potřeba nic instalovat ani stahovat. Zprávy a hovory probíhají přímo P2P mezi prohlížeči přes veřejné šifrované WSS MQTT a WebRTC brokery.
+- Není potřeba nic instalovat ani stahovat. Zprávy probíhají mezi prohlížeči přes veřejné šifrované WSS MQTT brokery.
 
 ---
 

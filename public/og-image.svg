@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Bezpečný Chat</title>
+  <desc id="desc">E2EE messenger s Double Ratchet protokolem</desc>
+  <rect width="1200" height="630" fill="#020617"/>
+  <rect x="72" y="72" width="1056" height="486" rx="28" fill="#0f172a" stroke="#14b8a6" stroke-width="3"/>
+  <text x="120" y="270" fill="#f8fafc" font-family="sans-serif" font-size="72" font-weight="700">Bezpečný Chat</text>
+  <text x="120" y="350" fill="#5eead4" font-family="sans-serif" font-size="36">E2EE Messenger s Double Ratchet</text>
+  <text x="120" y="430" fill="#94a3b8" font-family="monospace" font-size="26">X3DH  •  KECCAK-256  •  lokální trezor</text>
+</svg>

@@ -81,7 +81,8 @@ const MainAppContent: React.FC = () => {
       />
 
       {/* Main Chat Interface */}
-      <div className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex overflow-hidden" aria-label="Hlavní chat">
+        <h1 className="sr-only">Bezpečný Chat - šifrované zprávy</h1>
         <ChatList
           onNewChat={() => setIsNewContactOpen(true)}
           onNewGroup={() => setIsGroupCreateOpen(true)}
@@ -93,7 +94,7 @@ const MainAppContent: React.FC = () => {
           onMobileBack={() => setActiveConversationId(null)}
           isMobileChatOpen={Boolean(activeConversationId)}
         />
-      </div>
+      </main>
 
       {/* Modals & Overlays */}
       <AuthModal

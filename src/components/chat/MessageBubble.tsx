@@ -14,7 +14,6 @@ import {
   Pause,
   AlertCircle,
   Sparkles,
-  HeartHandshake,
 } from 'lucide-react';
 import { ChatMessage } from '../../types/chat';
 import { formatKeccakAddress } from '../../crypto/keccak';
@@ -75,7 +74,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             : 'bg-slate-800/95 text-slate-100 rounded-tl-xs border border-slate-700/80'
         }`}
       >
-        {/* Header badges: Self Destruct & Crisis Guard Indicator */}
+        {/* Header badges: Self Destruct */}
         <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
           {remainingSec !== null && (
             <div className="flex items-center space-x-1 text-[9px] font-mono text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-500/30 w-fit">
@@ -86,12 +85,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </div>
           )}
 
-          {message.isCrisisFlagged && (
-            <div className="flex items-center space-x-1 text-[9px] font-mono text-rose-300 bg-rose-950/60 px-2 py-0.5 rounded-full border border-rose-500/40 w-fit">
-              <HeartHandshake className="w-2.5 h-2.5 text-rose-400" />
-              <span>Safety Guard Kontrolováno</span>
-            </div>
-          )}
         </div>
 
         {/* Message Content depending on Type */}

@@ -40,7 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { isOnline, offlineQueueCount } = useChat();
 
   return (
-    <header className="h-16 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between gap-2 z-30 select-none">
+    <nav aria-label="Hlavní navigace" className="h-16 bg-slate-900 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between gap-2 z-30 select-none">
       {/* Brand & Security Status */}
       <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
         <div className="relative flex-shrink-0 flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-cyber-600 to-cyber-400 text-slate-950 font-bold shadow-lg shadow-cyber-500/20">
@@ -160,6 +160,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
       </div>
-    </header>
+    </nav>
   );
 };
